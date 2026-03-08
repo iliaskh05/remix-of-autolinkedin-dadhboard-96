@@ -7,6 +7,7 @@ import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import PostDetail from "./pages/PostDetail";
+import LinkedInCallback from "./pages/LinkedInCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
