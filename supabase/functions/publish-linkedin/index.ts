@@ -42,7 +42,7 @@ serve(async (req) => {
     const { data: settings } = await supabase
       .from("app_settings")
       .select("key, value")
-      .in("key", ["linkedin_access_token", "linkedin_person_urn"]);
+      .in("key", ["linkedin_access_token", "linkedin_person_urn", "linkedin_organization_id"]);
 
     const settingsMap: Record<string, string> = {};
     settings?.forEach((s: { key: string; value: string }) => {
