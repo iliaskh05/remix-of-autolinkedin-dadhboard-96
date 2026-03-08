@@ -185,6 +185,17 @@ const Dashboard = () => {
                         <Send className="h-4 w-4" />
                       </Button>
                     )}
+                    {post.status === "failed" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => publishPost.mutate(post.id)}
+                        disabled={publishPost.isPending}
+                        title="Retry publishing"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
