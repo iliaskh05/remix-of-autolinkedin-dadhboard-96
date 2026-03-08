@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Loader2, ExternalLink, Key, User } from "lucide-react";
+import { Save, Loader2, ExternalLink, Key, User, Link as LinkIcon, CheckCircle } from "lucide-react";
 
 const settingsFields = [
   {
@@ -29,6 +29,7 @@ const Settings = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>({});
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const { isLoading } = useQuery({
     queryKey: ["settings"],
@@ -64,6 +65,26 @@ const Settings = () => {
     },
   });
 
+  const handleConnectLinkedIn = async () => {
+    setIsConnecting(true);
+    try {
+      const redirectUri = `${window.location.origin}/linkedin/callback`;
+      const { data, error } = await supabase.functions.invoke("linkedin-oauth", {
+        body: { action: "get_auth_url", redirectUri },
+      });
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error);
+      
+      // Redirect to LinkedIn authorization page
+      window.location.href = data.authUrl;
+    } catch (err) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to start OAuth", variant: "destructive" });
+      setIsConnecting(false);
+    }
+  };
+
+  const hasCredentials = values.linkedin_access_token && values.linkedin_person_urn;
+
   return (
     <div className="p-8 max-w-3xl mx-auto">
       <div className="mb-8">
@@ -73,22 +94,47 @@ const Settings = () => {
         </p>
       </div>
 
+      {/* OAuth Connect Card */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LinkIcon className="h-5 w-5" />
+            Connect LinkedIn Account
+          </CardTitle>
+          <CardDescription>
+            The easiest way to connect — authorize via LinkedIn OAuth and we'll automatically get your access token and Person URN.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {hasCredentials ? (
+            <div className="flex items-center gap-3 p-4 rounded-lg bg-primary/5 border border-primary/20">
+              <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium text-sm">LinkedIn Connected</p>
+                <p className="text-xs text-muted-foreground">Person URN: {values.linkedin_person_urn}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleConnectLinkedIn} disabled={isConnecting}>
+                {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reconnect"}
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={handleConnectLinkedIn} disabled={isConnecting} className="w-full">
+              {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LinkIcon className="h-4 w-4" />}
+              Connect with LinkedIn
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Manual Credentials Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            LinkedIn API Credentials
+            Manual Credentials
           </CardTitle>
           <CardDescription>
-            You need a LinkedIn API access token to publish posts.{" "}
-            <a
-              href="https://www.linkedin.com/developers/apps"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline inline-flex items-center gap-1"
-            >
-              Get your credentials <ExternalLink className="h-3 w-3" />
-            </a>
+            Or enter your credentials manually if you already have an access token.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -134,14 +180,17 @@ const Settings = () => {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>How to get LinkedIn credentials</CardTitle>
+          <CardTitle>Important: LinkedIn App Setup</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-3">
+          <p>Before connecting, make sure your LinkedIn app is configured correctly:</p>
           <ol className="list-decimal list-inside space-y-2">
-            <li>Go to <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">LinkedIn Developers</a> and create an app</li>
-            <li>Under Products, request access to <strong>Share on LinkedIn</strong> and <strong>Sign In with LinkedIn using OpenID Connect</strong></li>
-            <li>Go to the Auth tab and copy your Access Token</li>
-            <li>Your Person URN can be found via the LinkedIn API: <code className="bg-muted px-1.5 py-0.5 rounded text-xs">GET /v2/me</code> — it looks like <code className="bg-muted px-1.5 py-0.5 rounded text-xs">urn:li:person:ABC123</code></li>
+            <li>Go to <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">LinkedIn Developers</a> and select your app</li>
+            <li>Under <strong>Products</strong>, request access to <strong>Share on LinkedIn</strong> and <strong>Sign In with LinkedIn using OpenID Connect</strong></li>
+            <li>Under <strong>Auth → OAuth 2.0 settings</strong>, add this redirect URL:
+              <code className="bg-muted px-1.5 py-0.5 rounded text-xs block mt-1">{window.location.origin}/linkedin/callback</code>
+            </li>
+            <li>Then click <strong>"Connect with LinkedIn"</strong> above</li>
           </ol>
         </CardContent>
       </Card>

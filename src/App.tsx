@@ -7,6 +7,7 @@ import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import PostDetail from "./pages/PostDetail";
+import LinkedInCallback from "./pages/LinkedInCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/" element={<Dashboard />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/post/:id" element={<PostDetail />} />
+            <Route path="/linkedin/callback" element={<LinkedInCallback />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
