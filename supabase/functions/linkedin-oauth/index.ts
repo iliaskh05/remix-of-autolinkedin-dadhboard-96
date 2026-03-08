@@ -62,14 +62,31 @@ serve(async (req) => {
       const accessToken = tokenData.access_token;
 
       // Get the user's profile to retrieve person URN
-      const profileRes = await fetch("https://api.linkedin.com/v2/me", {
+      // Try /v2/userinfo first (OpenID Connect), fallback to /v2/me
+      let personUrn = "";
+      
+      const userinfoRes = await fetch("https://api.linkedin.com/v2/userinfo", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-
-      let personUrn = "";
-      if (profileRes.ok) {
-        const profileData = await profileRes.json();
-        personUrn = `urn:li:person:${profileData.id}`;
+      
+      if (userinfoRes.ok) {
+        const userinfoData = await userinfoRes.json();
+        console.log("Userinfo response:", JSON.stringify(userinfoData));
+        // sub is the member ID
+        if (userinfoData.sub) {
+          personUrn = `urn:li:person:${userinfoData.sub}`;
+        }
+      } else {
+        console.warn("Userinfo failed, trying /v2/me:", userinfoRes.status);
+        const profileRes = await fetch("https://api.linkedin.com/v2/me", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          personUrn = `urn:li:person:${profileData.id}`;
+        } else {
+          console.error("Both profile endpoints failed");
+        }
       }
 
       // Save credentials to app_settings
