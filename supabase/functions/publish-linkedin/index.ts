@@ -79,7 +79,7 @@ serve(async (req) => {
           body: JSON.stringify({
             registerUploadRequest: {
               recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
-              owner: personUrn,
+              owner: authorUrn,
               serviceRelationships: [
                 { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" }
               ]
