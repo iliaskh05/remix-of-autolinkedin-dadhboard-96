@@ -109,7 +109,7 @@ serve(async (req) => {
 
     // Create the post
     const postBody: Record<string, unknown> = {
-      author: personUrn,
+      author: authorUrn,
       lifecycleState: "PUBLISHED",
       specificContent: {
         "com.linkedin.ugc.ShareContent": {
