@@ -51,6 +51,7 @@ serve(async (req) => {
 
     const accessToken = settingsMap.linkedin_access_token;
     const personUrn = settingsMap.linkedin_person_urn;
+    const organizationId = settingsMap.linkedin_organization_id;
 
     if (!accessToken || !personUrn) {
       return new Response(
@@ -58,6 +59,11 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Use organization URN if configured, otherwise fall back to person URN
+    const authorUrn = organizationId
+      ? `urn:li:organization:${organizationId}`
+      : personUrn;
 
     // If we have an image, upload it to LinkedIn first
     let imageAsset: string | null = null;
