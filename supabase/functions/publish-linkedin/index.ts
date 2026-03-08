@@ -42,7 +42,7 @@ serve(async (req) => {
     const { data: settings } = await supabase
       .from("app_settings")
       .select("key, value")
-      .in("key", ["linkedin_access_token", "linkedin_person_urn"]);
+      .in("key", ["linkedin_access_token", "linkedin_person_urn", "linkedin_organization_id"]);
 
     const settingsMap: Record<string, string> = {};
     settings?.forEach((s: { key: string; value: string }) => {
@@ -51,6 +51,7 @@ serve(async (req) => {
 
     const accessToken = settingsMap.linkedin_access_token;
     const personUrn = settingsMap.linkedin_person_urn;
+    const organizationId = settingsMap.linkedin_organization_id;
 
     if (!accessToken || !personUrn) {
       return new Response(
@@ -58,6 +59,11 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Use organization URN if configured, otherwise fall back to person URN
+    const authorUrn = organizationId
+      ? `urn:li:organization:${organizationId}`
+      : personUrn;
 
     // If we have an image, upload it to LinkedIn first
     let imageAsset: string | null = null;
@@ -73,7 +79,7 @@ serve(async (req) => {
           body: JSON.stringify({
             registerUploadRequest: {
               recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
-              owner: personUrn,
+              owner: authorUrn,
               serviceRelationships: [
                 { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" }
               ]
@@ -103,7 +109,7 @@ serve(async (req) => {
 
     // Create the post
     const postBody: Record<string, unknown> = {
-      author: personUrn,
+      author: authorUrn,
       lifecycleState: "PUBLISHED",
       specificContent: {
         "com.linkedin.ugc.ShareContent": {

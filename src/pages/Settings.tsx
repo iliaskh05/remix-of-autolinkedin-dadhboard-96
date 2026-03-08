@@ -23,6 +23,13 @@ const settingsFields = [
     icon: User,
     type: "text" as const,
   },
+  {
+    key: "linkedin_organization_id",
+    label: "LinkedIn Organization ID (Page)",
+    description: "L'ID numérique de votre page LinkedIn (ex: 123456789). Si renseigné, les posts seront publiés sur la page.",
+    icon: ExternalLink,
+    type: "text" as const,
+  },
 ];
 
 const Settings = () => {
