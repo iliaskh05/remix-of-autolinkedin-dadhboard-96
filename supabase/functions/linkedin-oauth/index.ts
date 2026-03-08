@@ -26,7 +26,7 @@ serve(async (req) => {
 
     if (action === "get_auth_url") {
       // Generate the LinkedIn OAuth authorization URL
-      const scopes = "openid profile w_member_social";
+      const scopes = "openid profile w_member_social w_organization_social r_organization_social";
       const state = crypto.randomUUID();
       const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
       
