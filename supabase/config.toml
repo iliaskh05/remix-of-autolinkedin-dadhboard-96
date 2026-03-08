@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.run-workflow]
 verify_jwt = false
+
+[functions.linkedin-oauth]
+verify_jwt = false
