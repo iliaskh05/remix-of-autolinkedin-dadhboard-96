@@ -28,7 +28,7 @@ serve(async (req) => {
       // Generate the LinkedIn OAuth authorization URL
       // Org scopes require LinkedIn Marketing Developer Platform approval.
       // Default to personal posting scopes only to avoid OAuth "unauthorized_scope_error".
-      const scopes = "openid profile email w_member_social";
+      const scopes = "openid profile email w_member_social w_organization_social r_organization_social rw_organization_admin";
       const state = crypto.randomUUID();
       const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
       
