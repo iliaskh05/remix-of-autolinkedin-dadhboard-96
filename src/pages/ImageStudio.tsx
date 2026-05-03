@@ -33,7 +33,7 @@ const ImageStudio = () => {
     setImageUrl(null);
     try {
       const { data, error } = await supabase.functions.invoke("generate-image", {
-        body: { prompt, bottomMarginPercent: margin },
+        body: { prompt, bottomMarginPercent: margin, model },
       });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || "Échec de la génération");
