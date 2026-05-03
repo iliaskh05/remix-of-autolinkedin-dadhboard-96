@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { Play, Loader2, Eye, Send, RefreshCw } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -76,9 +77,9 @@ const Dashboard = () => {
         description: requiresReconnect ? "Your LinkedIn session expired. Open Settings and reconnect, then retry." : message,
         variant: "destructive",
         action: requiresReconnect ? (
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings")}>
+          <ToastAction altText="Open settings" onClick={() => navigate("/settings")}>
             Settings
-          </Button>
+          </ToastAction>
         ) : undefined,
       });
 
