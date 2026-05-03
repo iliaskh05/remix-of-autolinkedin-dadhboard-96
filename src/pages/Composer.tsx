@@ -489,6 +489,10 @@ const Composer = () => {
                       rows={2}
                       className="bg-background/40"
                     />
+                    <p className="text-[11px] text-muted-foreground">
+                      Style, palette, texte intégré → définis tes préférences dans{" "}
+                      <button onClick={() => navigate("/image-studio")} className="text-primary hover:underline">Image Studio</button>.
+                    </p>
                     <div className="flex gap-2">
                       <Button
                         onClick={() => generateImage.mutate()}
