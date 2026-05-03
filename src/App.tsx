@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import AuthGuard from "@/components/AuthGuard";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
+import Composer from "./pages/Composer";
 import Settings from "./pages/Settings";
 import PostDetail from "./pages/PostDetail";
 import LinkedInCallback from "./pages/LinkedInCallback";
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/linkedin/callback" element={<LinkedInCallback />} />
             <Route element={<AuthGuard><Layout /></AuthGuard>}>
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/composer" element={<Composer />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/post/:id" element={<PostDetail />} />
               <Route path="/image-studio" element={<ImageStudio />} />

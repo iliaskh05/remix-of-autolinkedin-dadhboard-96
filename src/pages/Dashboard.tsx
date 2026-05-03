@@ -1,247 +1,271 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { format, subDays, startOfDay } from "date-fns";
+import {
+  Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  PieChart, Pie, Cell, Legend
+} from "recharts";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ToastAction } from "@/components/ui/toast";
-import { useToast } from "@/hooks/use-toast";
-import { Play, Loader2, Eye, Send, RefreshCw, Zap, Sparkles } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import {
+  Loader2, Send, Eye, Sparkles, BarChart3, Clock, CheckCircle2,
+  AlertTriangle, Calendar, Plus, FileText
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const statusColors: Record<string, string> = {
+const STATUS_COLORS: Record<string, string> = {
+  draft: "hsl(var(--muted-foreground))",
+  ready: "hsl(var(--primary))",
+  scheduled: "hsl(var(--accent))",
+  published: "hsl(var(--success))",
+  failed: "hsl(var(--destructive))",
+  generating: "hsl(var(--accent))",
+};
+
+const statusBadge: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
   generating: "bg-accent/20 text-accent-foreground",
   ready: "bg-primary/10 text-primary",
+  scheduled: "bg-accent/15 text-accent-foreground",
   published: "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]",
   failed: "bg-destructive/10 text-destructive",
 };
 
 const Dashboard = () => {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const [isRunning, setIsRunning] = useState(false);
-
   const { data: posts, isLoading } = useQuery({
     queryKey: ["posts"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("posts")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
   });
 
-  const runWorkflow = useMutation({
-    mutationFn: async (autoPublish: boolean) => {
-      setIsRunning(true);
-      const { data, error } = await supabase.functions.invoke("run-workflow", {
-        body: { autoPublish },
-      });
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
-      return data;
-    },
-    onSuccess: (data) => {
-      toast({ title: "Workflow completed!", description: `Post "${data.post?.title}" created successfully.` });
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
-    },
-    onError: (error) => {
-      toast({ title: "Workflow failed", description: error.message, variant: "destructive" });
-    },
-    onSettled: () => setIsRunning(false),
-  });
+  const stats = useMemo(() => {
+    const total = posts?.length || 0;
+    const published = posts?.filter((p) => p.status === "published").length || 0;
+    const scheduled = posts?.filter((p) => p.status === "scheduled").length || 0;
+    const drafts = posts?.filter((p) => ["draft", "ready"].includes(p.status)).length || 0;
+    const failed = posts?.filter((p) => p.status === "failed").length || 0;
+    const successRate = total ? Math.round((published / total) * 100) : 0;
 
-  const publishPost = useMutation({
-    mutationFn: async (postId: string) => {
-      const { data, error } = await supabase.functions.invoke("publish-linkedin", {
-        body: { postId },
-      });
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
-      return data;
-    },
-    onSuccess: () => {
-      toast({ title: "Published!", description: "Post published to LinkedIn." });
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "Failed to publish post.";
-      const requiresReconnect = message.toLowerCase().includes("reconnect your account") || message.includes("LINKEDIN_TOKEN_EXPIRED");
+    // Last 14 days activity
+    const days = Array.from({ length: 14 }).map((_, i) => {
+      const d = startOfDay(subDays(new Date(), 13 - i));
+      const next = new Date(d.getTime() + 86400000);
+      const dayPosts = posts?.filter((p) => {
+        const c = new Date(p.created_at);
+        return c >= d && c < next;
+      }) || [];
+      return {
+        date: format(d, "dd MMM"),
+        created: dayPosts.length,
+        published: dayPosts.filter((p) => p.status === "published").length,
+      };
+    });
 
-      toast({
-        title: requiresReconnect ? "LinkedIn reconnection required" : "Publish failed",
-        description: requiresReconnect ? "Your LinkedIn session expired. Open Settings and reconnect, then retry." : message,
-        variant: "destructive",
-        action: requiresReconnect ? (
-          <ToastAction altText="Open settings" onClick={() => navigate("/settings")}>
-            Settings
-          </ToastAction>
-        ) : undefined,
-      });
+    const breakdown = ["draft", "ready", "scheduled", "published", "failed"].map((s) => ({
+      name: s,
+      value: posts?.filter((p) => p.status === s).length || 0,
+    })).filter((d) => d.value > 0);
 
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
-    },
-  });
+    return { total, published, scheduled, drafts, failed, successRate, days, breakdown };
+  }, [posts]);
 
-  const stats = {
-    total: posts?.length || 0,
-    published: posts?.filter((p) => p.status === "published").length || 0,
-    ready: posts?.filter((p) => p.status === "ready").length || 0,
-  };
+  const upcoming = posts?.filter((p) => p.status === "scheduled").slice(0, 5) || [];
+  const recent = posts?.slice(0, 6) || [];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto animate-fade-in-up">
+    <div className="p-8 max-w-7xl mx-auto animate-fade-in-up">
       <div className="flex items-center justify-between mb-10">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Workspace</div>
+          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Analytics</div>
           <h1 className="text-4xl font-semibold tracking-tight">
-            Your <span className="text-gradient">content engine</span>
+            Tes <span className="text-gradient">performances</span>
           </h1>
-          <p className="text-muted-foreground mt-2">
-            Generate, illustrate and publish posts to LinkedIn — on autopilot.
-          </p>
+          <p className="text-muted-foreground mt-2">Suivi, KPIs et historique de tes publications LinkedIn.</p>
         </div>
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            onClick={() => runWorkflow.mutate(false)}
-            disabled={isRunning}
-            className="border-border/60 bg-card/40 backdrop-blur hover:bg-card"
-          >
-            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Generate Post
-          </Button>
-          <Button
-            onClick={() => runWorkflow.mutate(true)}
-            disabled={isRunning}
-            className="relative overflow-hidden bg-gradient-to-r from-primary to-accent text-white hover:opacity-95 glow-primary group"
-          >
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
-            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-            Generate & Publish
-          </Button>
-        </div>
+        <Button asChild className="bg-gradient-to-r from-primary to-accent text-white glow-primary">
+          <Link to="/composer"><Plus className="h-4 w-4" /> Nouveau post</Link>
+        </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         {[
-          { label: "Total Posts", value: stats.total, icon: RefreshCw, color: "from-blue-500/20 to-cyan-400/10", iconColor: "text-blue-400" },
-          { label: "Ready to Publish", value: stats.ready, icon: Eye, color: "from-purple-500/20 to-pink-400/10", iconColor: "text-purple-400" },
-          { label: "Published", value: stats.published, icon: Send, color: "from-emerald-500/20 to-teal-400/10", iconColor: "text-emerald-400" },
-        ].map((stat) => (
-          <Card key={stat.label} className="relative overflow-hidden border-border/50 bg-card/60 backdrop-blur-xl hover:border-border transition-colors">
-            <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-50`} />
-            <CardContent className="relative p-6 flex items-center gap-4">
-              <div className="h-12 w-12 rounded-xl bg-background/40 backdrop-blur border border-border/40 flex items-center justify-center">
-                <stat.icon className={`h-5 w-5 ${stat.iconColor}`} />
-              </div>
-              <div>
-                <p className="text-3xl font-semibold tracking-tight">{stat.value}</p>
-                <p className="text-xs uppercase tracking-wider text-muted-foreground mt-0.5">{stat.label}</p>
+          { label: "Total", value: stats.total, icon: FileText, color: "text-blue-400", bg: "from-blue-500/20 to-cyan-400/10" },
+          { label: "Publiés", value: stats.published, icon: CheckCircle2, color: "text-emerald-400", bg: "from-emerald-500/20 to-teal-400/10" },
+          { label: "Programmés", value: stats.scheduled, icon: Calendar, color: "text-purple-400", bg: "from-purple-500/20 to-pink-400/10" },
+          { label: "Brouillons", value: stats.drafts, icon: Clock, color: "text-amber-400", bg: "from-amber-500/20 to-orange-400/10" },
+          { label: "Taux succès", value: `${stats.successRate}%`, icon: BarChart3, color: "text-primary", bg: "from-primary/20 to-accent/10" },
+        ].map((s) => (
+          <Card key={s.label} className="relative overflow-hidden border-border/50 bg-card/60 backdrop-blur-xl">
+            <div className={`absolute inset-0 bg-gradient-to-br ${s.bg} opacity-50`} />
+            <CardContent className="relative p-5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-background/40 backdrop-blur border border-border/40 flex items-center justify-center">
+                  <s.icon className={`h-4 w-4 ${s.color}`} />
+                </div>
+                <div>
+                  <p className="text-2xl font-semibold tracking-tight">{s.value}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{s.label}</p>
+                </div>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Posts List */}
-      <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-        <CardHeader className="border-b border-border/40">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-primary to-accent" />
-            Recent Posts
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-4">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : !posts?.length ? (
-            <div className="text-center py-16 text-muted-foreground">
-              <div className="mx-auto h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mb-4">
-                <Sparkles className="h-6 w-6 text-primary" />
-              </div>
-              <p className="text-base font-medium text-foreground">No posts yet</p>
-              <p className="text-sm mt-1">Click "Generate Post" to create your first one.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {posts.map((post) => (
-                <div
-                  key={post.id}
-                  className="group flex items-center gap-4 p-4 rounded-xl border border-border/40 bg-background/30 hover:bg-background/60 hover:border-border transition-all"
-                >
-                  {post.image_url && !post.image_url.startsWith("data:") ? (
-                    <img
-                      src={post.image_url}
-                      alt=""
-                      className="h-14 w-14 rounded-lg object-cover flex-shrink-0 ring-1 ring-border/50"
-                    />
-                  ) : (
-                    <div className="h-14 w-14 rounded-lg flex-shrink-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                      <Sparkles className="h-5 w-5 text-primary/70" />
+      {/* Charts */}
+      <div className="grid lg:grid-cols-3 gap-6 mb-8">
+        <Card className="lg:col-span-2 border-border/50 bg-card/60 backdrop-blur-xl">
+          <CardHeader className="border-b border-border/40">
+            <CardTitle className="text-base">Activité — 14 derniers jours</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={stats.days}>
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                <Area type="monotone" dataKey="created" stroke="hsl(var(--primary))" fill="url(#g1)" strokeWidth={2} />
+                <Area type="monotone" dataKey="published" stroke="hsl(var(--accent))" fill="url(#g2)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+          <CardHeader className="border-b border-border/40">
+            <CardTitle className="text-base">Répartition par statut</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            {stats.breakdown.length ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <PieChart>
+                  <Pie data={stats.breakdown} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={3}>
+                    {stats.breakdown.map((entry) => (
+                      <Cell key={entry.name} fill={STATUS_COLORS[entry.name]} />
+                    ))}
+                  </Pie>
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">Aucune donnée</div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Upcoming + Recent */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+          <CardHeader className="border-b border-border/40">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-accent" /> À venir
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            {upcoming.length === 0 ? (
+              <div className="text-center py-10 text-sm text-muted-foreground">Aucun post programmé.</div>
+            ) : (
+              <div className="space-y-2">
+                {upcoming.map((p) => (
+                  <Link key={p.id} to={`/post/${p.id}`} className="flex items-center gap-3 p-3 rounded-lg hover:bg-background/40 transition">
+                    <div className="h-9 w-9 rounded-lg bg-accent/15 flex items-center justify-center">
+                      <Calendar className="h-4 w-4 text-accent" />
                     </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium truncate">{post.title}</h3>
-                    <p className="text-sm text-muted-foreground truncate mt-0.5">
-                      {post.content.substring(0, 100)}...
-                    </p>
-                    <p className="text-xs text-muted-foreground/70 mt-1">
-                      {new Date(post.created_at).toLocaleDateString("en-US", {
-                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-                  <Badge className={cn("capitalize border-0", statusColors[post.status] || "")} variant="secondary">
-                    {post.status}
-                  </Badge>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" asChild className="hover:bg-primary/10 hover:text-primary">
-                      <Link to={`/post/${post.id}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    {post.status === "ready" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => publishPost.mutate(post.id)}
-                        disabled={publishPost.isPending}
-                        className="hover:bg-primary/10 hover:text-primary"
-                      >
-                        <Send className="h-4 w-4" />
-                      </Button>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {p.scheduled_at ? format(new Date(p.scheduled_at), "PPp") : "—"}
+                      </p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+          <CardHeader className="border-b border-border/40">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" /> Historique récent
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            {recent.length === 0 ? (
+              <div className="text-center py-10">
+                <Sparkles className="h-6 w-6 text-primary/70 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">Aucun post pour l'instant.</p>
+                <Button asChild size="sm" className="mt-3">
+                  <Link to="/composer">Créer le premier</Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {recent.map((p) => (
+                  <Link key={p.id} to={`/post/${p.id}`} className="flex items-center gap-3 p-3 rounded-lg hover:bg-background/40 transition">
+                    {p.image_url && !p.image_url.startsWith("data:") ? (
+                      <img src={p.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                    ) : (
+                      <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                        <Sparkles className="h-4 w-4 text-primary/70" />
+                      </div>
                     )}
-                    {post.status === "failed" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => publishPost.mutate(post.id)}
-                        disabled={publishPost.isPending}
-                        title="Retry publishing"
-                        className="hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(p.created_at), "PP")}
+                      </p>
+                    </div>
+                    <Badge className={cn("capitalize border-0 text-xs", statusBadge[p.status])} variant="secondary">
+                      {p.status}
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {stats.failed > 0 && (
+        <Card className="mt-6 border-destructive/30 bg-destructive/5">
+          <CardContent className="p-4 flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            <p className="text-sm">
+              {stats.failed} publication{stats.failed > 1 ? "s" : ""} en échec. Réessaie depuis le détail du post.
+            </p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
-
 
 export default Dashboard;
