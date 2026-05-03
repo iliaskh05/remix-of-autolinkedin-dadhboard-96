@@ -579,12 +579,18 @@ const Composer = () => {
             </CardContent>
           </Card>
 
-          {/* Schedule */}
+          {/* Publish panel */}
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader className="border-b border-border/40">
+              <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground">
+                <Send className="h-4 w-4 text-primary" /> Publication
+              </CardTitle>
+            </CardHeader>
             <CardContent className="p-5 space-y-4">
+              {/* Schedule toggle */}
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2 text-sm">
-                  <CalendarIcon className="h-4 w-4 text-primary" /> Programmer la publication
+                  <CalendarIcon className="h-4 w-4 text-primary" /> Programmer
                 </Label>
                 <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} />
               </div>
@@ -611,60 +617,60 @@ const Composer = () => {
                   <Input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="bg-background/40" />
                 </div>
               )}
+
+              {/* Primary actions */}
+              <div className="grid gap-2 pt-3 border-t border-border/40">
+                {scheduleEnabled ? (
+                  <Button
+                    onClick={() => submit("schedule")}
+                    disabled={!!busy || !content.trim() || !scheduledISO}
+                    className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                    size="lg"
+                  >
+                    {busy === "schedule" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4" />}
+                    Programmer
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => submit("publish")}
+                    disabled={!!busy || !content.trim()}
+                    className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                    size="lg"
+                  >
+                    {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Publier maintenant
+                  </Button>
+                )}
+                <Button
+                  onClick={() => submit("draft")}
+                  disabled={!!busy || !content.trim()}
+                  variant="outline"
+                >
+                  {busy === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Enregistrer en brouillon
+                </Button>
+              </div>
+
+              {/* Automate */}
+              <div className="pt-3 border-t border-border/40">
+                <Button
+                  onClick={() => { setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation"); setAutoOpen(true); }}
+                  disabled={!canAutomate}
+                  variant="outline"
+                  className="w-full border-dashed"
+                  title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un prompt"}
+                >
+                  <Repeat className="h-4 w-4" />
+                  Automatiser (récurrent)
+                </Button>
+                {!canAutomate && (
+                  <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
+                    Pour automatiser : texte en mode IA + prompt. Image (si activée) en mode IA aussi.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
-
-          {/* Actions */}
-          <div className="grid gap-2">
-            {scheduleEnabled ? (
-              <Button
-                onClick={() => submit("schedule")}
-                disabled={!!busy || !content.trim() || !scheduledISO}
-                className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
-                size="lg"
-              >
-                {busy === "schedule" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4" />}
-                Programmer
-              </Button>
-            ) : (
-              <Button
-                onClick={() => submit("publish")}
-                disabled={!!busy || !content.trim()}
-                className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
-                size="lg"
-              >
-                {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Publier maintenant
-              </Button>
-            )}
-            <Button
-              onClick={() => submit("draft")}
-              disabled={!!busy || !content.trim()}
-              variant="outline"
-            >
-              {busy === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Enregistrer en brouillon
-            </Button>
-
-            {/* Automate */}
-            <div className="pt-3 mt-1 border-t border-border/40">
-              <Button
-                onClick={() => { setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation"); setAutoOpen(true); }}
-                disabled={!canAutomate}
-                variant="outline"
-                className="w-full border-dashed"
-                title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un prompt"}
-              >
-                <Repeat className="h-4 w-4" />
-                Automatiser (publication récurrente)
-              </Button>
-              {!canAutomate && (
-                <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
-                  Pour automatiser, le texte doit être en mode IA (avec un prompt). Si une image est incluse, elle doit aussi être en mode IA.
-                </p>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
