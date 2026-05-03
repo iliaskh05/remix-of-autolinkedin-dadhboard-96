@@ -1,9 +1,10 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Send, Loader2 } from "lucide-react";
 
@@ -11,6 +12,7 @@ const PostDetail = () => {
   const { id } = useParams();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const { data: post, isLoading } = useQuery({
     queryKey: ["post", id],
@@ -39,7 +41,21 @@ const PostDetail = () => {
       queryClient.invalidateQueries({ queryKey: ["post", id] });
     },
     onError: (error) => {
-      toast({ title: "Publish failed", description: error.message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : "Failed to publish post.";
+      const requiresReconnect = message.toLowerCase().includes("reconnect your account") || message.includes("LINKEDIN_TOKEN_EXPIRED");
+
+      toast({
+        title: requiresReconnect ? "LinkedIn reconnection required" : "Publish failed",
+        description: requiresReconnect ? "Your LinkedIn session expired. Open Settings and reconnect, then retry." : message,
+        variant: "destructive",
+        action: requiresReconnect ? (
+          <ToastAction altText="Open settings" onClick={() => navigate("/settings")}>
+            Settings
+          </ToastAction>
+        ) : undefined,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["post", id] });
     },
   });
 

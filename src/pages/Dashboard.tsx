@@ -4,9 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { Play, Loader2, Eye, Send, RefreshCw } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 const statusColors: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -19,6 +20,7 @@ const statusColors: Record<string, string> = {
 const Dashboard = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [isRunning, setIsRunning] = useState(false);
 
   const { data: posts, isLoading } = useQuery({
@@ -67,7 +69,21 @@ const Dashboard = () => {
       queryClient.invalidateQueries({ queryKey: ["posts"] });
     },
     onError: (error) => {
-      toast({ title: "Publish failed", description: error.message, variant: "destructive" });
+      const message = error instanceof Error ? error.message : "Failed to publish post.";
+      const requiresReconnect = message.toLowerCase().includes("reconnect your account") || message.includes("LINKEDIN_TOKEN_EXPIRED");
+
+      toast({
+        title: requiresReconnect ? "LinkedIn reconnection required" : "Publish failed",
+        description: requiresReconnect ? "Your LinkedIn session expired. Open Settings and reconnect, then retry." : message,
+        variant: "destructive",
+        action: requiresReconnect ? (
+          <ToastAction altText="Open settings" onClick={() => navigate("/settings")}>
+            Settings
+          </ToastAction>
+        ) : undefined,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
     },
   });
 

@@ -60,6 +60,9 @@ serve(async (req) => {
       }
 
       const accessToken = tokenData.access_token;
+      const expiresAt = tokenData.expires_in
+        ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+        : null;
 
       // Get the user's profile to retrieve person URN
       // Try /v2/userinfo first (OpenID Connect), fallback to /v2/me
@@ -98,6 +101,13 @@ serve(async (req) => {
         { key: "linkedin_access_token", value: accessToken },
         { onConflict: "key" }
       );
+
+      if (expiresAt) {
+        await supabase.from("app_settings").upsert(
+          { key: "linkedin_access_token_expires_at", value: expiresAt },
+          { onConflict: "key" }
+        );
+      }
 
       if (personUrn) {
         await supabase.from("app_settings").upsert(

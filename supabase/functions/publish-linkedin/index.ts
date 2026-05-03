@@ -42,7 +42,7 @@ serve(async (req) => {
     const { data: settings } = await supabase
       .from("app_settings")
       .select("key, value")
-      .in("key", ["linkedin_access_token", "linkedin_person_urn", "linkedin_organization_id"]);
+      .in("key", ["linkedin_access_token", "linkedin_person_urn", "linkedin_organization_id", "linkedin_access_token_expires_at"]);
 
     const settingsMap: Record<string, string> = {};
     settings?.forEach((s: { key: string; value: string }) => {
@@ -52,11 +52,26 @@ serve(async (req) => {
     const accessToken = settingsMap.linkedin_access_token;
     const personUrn = settingsMap.linkedin_person_urn;
     const organizationId = settingsMap.linkedin_organization_id;
+    const tokenExpiresAt = settingsMap.linkedin_access_token_expires_at;
 
     if (!accessToken || !personUrn) {
       return new Response(
         JSON.stringify({ success: false, error: "LinkedIn credentials not configured. Go to Settings to add them." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (tokenExpiresAt && Number.isFinite(Date.parse(tokenExpiresAt)) && Date.parse(tokenExpiresAt) <= Date.now()) {
+      await supabase.from("posts").update({ status: "ready" }).eq("id", postId);
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          code: "LINKEDIN_TOKEN_EXPIRED",
+          requiresReconnect: true,
+          error: "Your LinkedIn connection has expired. Reconnect your account in Settings, then try publishing again.",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -142,11 +157,21 @@ serve(async (req) => {
       const errText = await linkedinRes.text();
       console.error("LinkedIn API error:", linkedinRes.status, errText);
       
-      await supabase.from("posts").update({ status: "failed" }).eq("id", postId);
+      const invalidToken = linkedinRes.status === 401 && errText.includes("INVALID_ACCESS_TOKEN");
+      await supabase.from("posts").update({ status: invalidToken ? "ready" : "failed" }).eq("id", postId);
       
       return new Response(
-        JSON.stringify({ success: false, error: `LinkedIn API error [${linkedinRes.status}]: ${errText}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify(
+          invalidToken
+            ? {
+                success: false,
+                code: "LINKEDIN_TOKEN_EXPIRED",
+                requiresReconnect: true,
+                error: "Your LinkedIn access token is no longer valid. Reconnect your account in Settings, then try again.",
+              }
+            : { success: false, error: `LinkedIn API error [${linkedinRes.status}]: ${errText}` }
+        ),
+        { status: invalidToken ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
