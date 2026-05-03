@@ -27,10 +27,16 @@ import { useNavigate } from "react-router-dom";
 
 type Mode = "ai" | "manual";
 
+const DAYS = [
+  { v: 1, label: "Lun" }, { v: 2, label: "Mar" }, { v: 3, label: "Mer" },
+  { v: 4, label: "Jeu" }, { v: 5, label: "Ven" }, { v: 6, label: "Sam" }, { v: 7, label: "Dim" },
+];
+
 const Composer = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Text
