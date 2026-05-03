@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
-import { Play, Loader2, Eye, Send, RefreshCw } from "lucide-react";
+import { Play, Loader2, Eye, Send, RefreshCw, Zap, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 const statusColors: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -94,12 +95,15 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-8 max-w-6xl mx-auto animate-fade-in-up">
+      <div className="flex items-center justify-between mb-10">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Generate and publish commodity market posts to LinkedIn
+          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Workspace</div>
+          <h1 className="text-4xl font-semibold tracking-tight">
+            Your <span className="text-gradient">content engine</span>
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Generate, illustrate and publish posts to LinkedIn — on autopilot.
           </p>
         </div>
         <div className="flex gap-3">
@@ -107,6 +111,7 @@ const Dashboard = () => {
             variant="outline"
             onClick={() => runWorkflow.mutate(false)}
             disabled={isRunning}
+            className="border-border/60 bg-card/40 backdrop-blur hover:bg-card"
           >
             {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             Generate Post
@@ -114,7 +119,9 @@ const Dashboard = () => {
           <Button
             onClick={() => runWorkflow.mutate(true)}
             disabled={isRunning}
+            className="relative overflow-hidden bg-gradient-to-r from-primary to-accent text-white hover:opacity-95 glow-primary group"
           >
+            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
             {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
             Generate & Publish
           </Button>
@@ -124,18 +131,19 @@ const Dashboard = () => {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
-          { label: "Total Posts", value: stats.total, icon: RefreshCw },
-          { label: "Ready to Publish", value: stats.ready, icon: Eye },
-          { label: "Published", value: stats.published, icon: Send },
+          { label: "Total Posts", value: stats.total, icon: RefreshCw, color: "from-blue-500/20 to-cyan-400/10", iconColor: "text-blue-400" },
+          { label: "Ready to Publish", value: stats.ready, icon: Eye, color: "from-purple-500/20 to-pink-400/10", iconColor: "text-purple-400" },
+          { label: "Published", value: stats.published, icon: Send, color: "from-emerald-500/20 to-teal-400/10", iconColor: "text-emerald-400" },
         ].map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <stat.icon className="h-5 w-5 text-primary" />
+          <Card key={stat.label} className="relative overflow-hidden border-border/50 bg-card/60 backdrop-blur-xl hover:border-border transition-colors">
+            <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-50`} />
+            <CardContent className="relative p-6 flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-background/40 backdrop-blur border border-border/40 flex items-center justify-center">
+                <stat.icon className={`h-5 w-5 ${stat.iconColor}`} />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
+                <p className="text-3xl font-semibold tracking-tight">{stat.value}</p>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mt-0.5">{stat.label}</p>
               </div>
             </CardContent>
           </Card>
@@ -143,50 +151,60 @@ const Dashboard = () => {
       </div>
 
       {/* Posts List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Posts</CardTitle>
+      <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+        <CardHeader className="border-b border-border/40">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-primary to-accent" />
+            Recent Posts
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-4">
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
+            <div className="flex items-center justify-center py-16">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : !posts?.length ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <p className="text-lg font-medium">No posts yet</p>
-              <p className="text-sm mt-1">Click "Generate Post" to create your first commodity market post.</p>
+            <div className="text-center py-16 text-muted-foreground">
+              <div className="mx-auto h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mb-4">
+                <Sparkles className="h-6 w-6 text-primary" />
+              </div>
+              <p className="text-base font-medium text-foreground">No posts yet</p>
+              <p className="text-sm mt-1">Click "Generate Post" to create your first one.</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {posts.map((post) => (
                 <div
                   key={post.id}
-                  className="flex items-center gap-4 p-4 rounded-lg border bg-card hover:shadow-sm transition-shadow"
+                  className="group flex items-center gap-4 p-4 rounded-xl border border-border/40 bg-background/30 hover:bg-background/60 hover:border-border transition-all"
                 >
-                  {post.image_url && !post.image_url.startsWith("data:") && (
+                  {post.image_url && !post.image_url.startsWith("data:") ? (
                     <img
                       src={post.image_url}
                       alt=""
-                      className="h-14 w-14 rounded-lg object-cover flex-shrink-0"
+                      className="h-14 w-14 rounded-lg object-cover flex-shrink-0 ring-1 ring-border/50"
                     />
+                  ) : (
+                    <div className="h-14 w-14 rounded-lg flex-shrink-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                      <Sparkles className="h-5 w-5 text-primary/70" />
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold truncate">{post.title}</h3>
+                    <h3 className="font-medium truncate">{post.title}</h3>
                     <p className="text-sm text-muted-foreground truncate mt-0.5">
                       {post.content.substring(0, 100)}...
                     </p>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="text-xs text-muted-foreground/70 mt-1">
                       {new Date(post.created_at).toLocaleDateString("en-US", {
                         month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
                       })}
                     </p>
                   </div>
-                  <Badge className={statusColors[post.status] || ""} variant="secondary">
+                  <Badge className={cn("capitalize border-0", statusColors[post.status] || "")} variant="secondary">
                     {post.status}
                   </Badge>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" asChild>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" asChild className="hover:bg-primary/10 hover:text-primary">
                       <Link to={`/post/${post.id}`}>
                         <Eye className="h-4 w-4" />
                       </Link>
@@ -197,6 +215,7 @@ const Dashboard = () => {
                         size="icon"
                         onClick={() => publishPost.mutate(post.id)}
                         disabled={publishPost.isPending}
+                        className="hover:bg-primary/10 hover:text-primary"
                       >
                         <Send className="h-4 w-4" />
                       </Button>
@@ -208,6 +227,7 @@ const Dashboard = () => {
                         onClick={() => publishPost.mutate(post.id)}
                         disabled={publishPost.isPending}
                         title="Retry publishing"
+                        className="hover:bg-destructive/10 hover:text-destructive"
                       >
                         <RefreshCw className="h-4 w-4" />
                       </Button>
@@ -223,7 +243,5 @@ const Dashboard = () => {
   );
 };
 
-// Need to import Zap for the button
-import { Zap } from "lucide-react";
 
 export default Dashboard;
