@@ -264,6 +264,7 @@ export type Database = {
       user_settings: {
         Row: {
           created_at: string
+          firecrawl_api_key: string | null
           gemini_api_key: string | null
           image_model: string
           linkedin_access_token: string | null
@@ -281,6 +282,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          firecrawl_api_key?: string | null
           gemini_api_key?: string | null
           image_model?: string
           linkedin_access_token?: string | null
@@ -298,6 +300,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          firecrawl_api_key?: string | null
           gemini_api_key?: string | null
           image_model?: string
           linkedin_access_token?: string | null
