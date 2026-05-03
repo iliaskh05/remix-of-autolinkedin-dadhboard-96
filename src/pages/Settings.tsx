@@ -127,6 +127,32 @@ const Settings = () => {
   };
 
   const hasCredentials = values.linkedin_access_token && values.linkedin_person_urn;
+  const expiresAtStr = values.linkedin_access_token_expires_at;
+  const expiresAt = expiresAtStr ? new Date(expiresAtStr) : null;
+  const isExpired = expiresAt ? expiresAt.getTime() < Date.now() : false;
+  const isConnected = hasCredentials && !isExpired;
+
+  const StatusBadge = () => {
+    if (!hasCredentials) {
+      return (
+        <Badge variant="outline" className="gap-1 border-muted-foreground/30 text-muted-foreground">
+          <XCircle className="h-3 w-3" /> Not connected
+        </Badge>
+      );
+    }
+    if (isExpired) {
+      return (
+        <Badge variant="destructive" className="gap-1">
+          <AlertTriangle className="h-3 w-3" /> Token expired
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="gap-1 bg-green-500/15 text-green-600 hover:bg-green-500/20 border border-green-500/30">
+        <CheckCircle className="h-3 w-3" /> Connected
+      </Badge>
+    );
+  };
 
   return (
     <div className="p-8 max-w-3xl mx-auto">
