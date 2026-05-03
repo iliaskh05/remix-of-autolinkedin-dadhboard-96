@@ -50,15 +50,23 @@ serve(async (req) => {
         messages: [
           {
             role: "user",
-            content: `Create a sophisticated, editorial-style SQUARE 1:1 image for a LinkedIn commodity market post. Subject: ${prompt}.
+            content: `A professional corporate infographic poster for a LinkedIn commodity market post. Subject: ${prompt}.
+
+Adapt the visual scene, the map focus, the icons and the data blocks to the subject above. Infer automatically:
+- the most relevant cinematic background scene tied to the subject (e.g. oil tanker at sea for energy/oil, wheat fields or grain silos for agri, copper mine or smelter for metals, container port for shipping, drought landscape for soft commodities, refinery for gas, etc.)
+- the geographic focus of the world map (highlight the relevant region/country/strait/route with a clean red marker, X, circle or arrow)
+- the 3 to 5 most relevant impacted commodities or sub-sectors to feature as data blocks
+- a short, bold, editorial-style MAIN TITLE in English, all caps, that captures the structural angle of the subject (max 12 words, no quotes)
+- a SUBTITLE with the relevant time window (month + year, current period if unknown)
 
 Strict art direction:
-- Format: STRICT square 1:1 aspect ratio. Reserve a clean empty band of approximately ${margin}% of the image height at the BOTTOM, free of any illustration, graphic or noise — this band is exclusively for the wordmark.
-- Wordmark: place ONLY the text "CommoHedge" perfectly horizontally centered inside that bottom band, with equal left/right margins. Use a clean modern sans-serif (Inter / Helvetica / Söhne style), medium weight, small-to-medium size, fully legible, in #A8E81C on black (or white if background in that band is black). No tagline, no other text, no watermark, no hashtags. The wordmark must NEVER be cropped, tilted, distorted or overlapped by any visual element.
-- Strict two-color palette: deep matte black (#000000) dominant, vivid lime green (#A8E81C) as the single accent. White only if strictly necessary.
-- Style: refined editorial / financial magazine aesthetic (Bloomberg Businessweek, Monocle, The Economist). Human senior art director feel — NOT generic AI art, no glossy 3D, no stock photo, no neon cyberpunk, no gradient soup.
-- Composition: bold negative space, strong geometric structure, single clear focal point in the upper ~${100 - margin}% of the canvas.
-- Avoid: cartoonish elements, emojis, melting shapes, lens flares, surreal AI artefacts, low-quality typography.`
+- Format: STRICT SQUARE 1:1 aspect ratio. Reserve a clean empty band of approximately ${margin}% of the image height at the BOTTOM, free of any illustration, chart, icon or text — this band is exclusively for the wordmark.
+- Wordmark: place ONLY the text "CommoHedge" perfectly horizontally centered inside that bottom band, equal left/right margins, clean modern sans-serif (Inter / Helvetica / Söhne), medium weight, small-to-medium size, fully legible, in gold/amber (#D4AF37) or vivid lime (#A8E81C) on dark. No tagline, no watermark, no hashtags, no other text in that band. Never cropped, tilted or overlapped.
+- Layout: modern financial infographic (Bloomberg / Financial Times / McKinsey report style), clean grid, dark theme (deep navy #0A1628, matte black #000000, gold accents #D4AF37, optional vivid lime #A8E81C as secondary accent).
+- Composition (top ~${100 - margin}% of the canvas): cinematic photographic background scene tied to the subject with realistic lighting and dramatic sky; a small world map block in one of the top corners highlighting the relevant region; a bold MAIN TITLE and a SUBTITLE clearly placed; 3 to 5 small data blocks with sharp monoline icons, short labels, percentages or arrows, and one or two minimal line/bar charts. Strong hierarchy, generous negative space, sharp grid alignment.
+- Typography: ultra-clean modern sans-serif throughout, perfectly legible, no spelling mistakes, minimal text but data-rich.
+- Style: high-end consulting / financial magazine. Realistic, premium, balanced. Human senior art director feel — NOT generic AI art.
+- Avoid: cartoonish elements, emojis, melting shapes, lens flares, surreal AI artefacts, glossy 3D, stock photo look, neon cyberpunk, gradient soup, low-quality or garbled typography, duplicated logos, any text inside the bottom wordmark band other than "CommoHedge".`
           }
         ],
         modalities: ["image", "text"]
