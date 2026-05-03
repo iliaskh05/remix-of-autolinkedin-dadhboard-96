@@ -8,6 +8,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Composer from "./pages/Composer";
+import Schedules from "./pages/Schedules";
 import Settings from "./pages/Settings";
 import PostDetail from "./pages/PostDetail";
 import LinkedInCallback from "./pages/LinkedInCallback";
@@ -32,6 +33,7 @@ const App = () => (
             <Route element={<AuthGuard><Layout /></AuthGuard>}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/composer" element={<Composer />} />
+              <Route path="/schedules" element={<Schedules />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/post/:id" element={<PostDetail />} />
               <Route path="/image-studio" element={<ImageStudio />} />

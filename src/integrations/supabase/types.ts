@@ -71,12 +71,14 @@ export type Database = {
       posts: {
         Row: {
           content: string
+          content_hash: string | null
           created_at: string
           id: string
           image_url: string | null
           linkedin_post_id: string | null
           news_summary: string | null
           published_at: string | null
+          schedule_id: string | null
           scheduled_at: string | null
           status: string
           title: string
@@ -84,12 +86,14 @@ export type Database = {
         }
         Insert: {
           content: string
+          content_hash?: string | null
           created_at?: string
           id?: string
           image_url?: string | null
           linkedin_post_id?: string | null
           news_summary?: string | null
           published_at?: string | null
+          schedule_id?: string | null
           scheduled_at?: string | null
           status?: string
           title: string
@@ -97,18 +101,28 @@ export type Database = {
         }
         Update: {
           content?: string
+          content_hash?: string | null
           created_at?: string
           id?: string
           image_url?: string | null
           linkedin_post_id?: string | null
           news_summary?: string | null
           published_at?: string | null
+          schedule_id?: string | null
           scheduled_at?: string | null
           status?: string
           title?: string
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "posts_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "schedules"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -133,6 +147,116 @@ export type Database = {
           display_name?: string | null
           id?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      schedule_runs: {
+        Row: {
+          created_at: string
+          id: string
+          message: string | null
+          post_id: string | null
+          schedule_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message?: string | null
+          post_id?: string | null
+          schedule_id: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string | null
+          post_id?: string | null
+          schedule_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedule_runs_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      schedules: {
+        Row: {
+          adhoc_sources: Json
+          ai_model: string | null
+          created_at: string
+          days_of_week: number[]
+          enabled: boolean
+          hour: number
+          id: string
+          image_mode: string
+          image_prompt: string | null
+          last_run_at: string | null
+          minute: number
+          name: string
+          next_run_at: string | null
+          prompt: string
+          recent_hashes: string[]
+          saved_source_ids: string[]
+          timezone: string
+          tone_instructions: string | null
+          updated_at: string
+          used_urls: string[]
+          user_id: string
+        }
+        Insert: {
+          adhoc_sources?: Json
+          ai_model?: string | null
+          created_at?: string
+          days_of_week?: number[]
+          enabled?: boolean
+          hour?: number
+          id?: string
+          image_mode?: string
+          image_prompt?: string | null
+          last_run_at?: string | null
+          minute?: number
+          name: string
+          next_run_at?: string | null
+          prompt?: string
+          recent_hashes?: string[]
+          saved_source_ids?: string[]
+          timezone?: string
+          tone_instructions?: string | null
+          updated_at?: string
+          used_urls?: string[]
+          user_id: string
+        }
+        Update: {
+          adhoc_sources?: Json
+          ai_model?: string | null
+          created_at?: string
+          days_of_week?: number[]
+          enabled?: boolean
+          hour?: number
+          id?: string
+          image_mode?: string
+          image_prompt?: string | null
+          last_run_at?: string | null
+          minute?: number
+          name?: string
+          next_run_at?: string | null
+          prompt?: string
+          recent_hashes?: string[]
+          saved_source_ids?: string[]
+          timezone?: string
+          tone_instructions?: string | null
+          updated_at?: string
+          used_urls?: string[]
           user_id?: string
         }
         Relationships: []
