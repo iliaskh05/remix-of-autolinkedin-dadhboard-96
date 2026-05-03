@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,8 +15,10 @@ import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
 import {
   Sparkles, Wand2, Image as ImageIcon, Upload, Send, Save, Loader2,
-  CalendarIcon, X, Type, RefreshCw, Linkedin
+  CalendarIcon, X, Type, RefreshCw, Linkedin, Lightbulb, Globe, Hash, Plus, BookMarked
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 type Mode = "ai" | "manual";
@@ -43,6 +45,34 @@ const Composer = () => {
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
   const [scheduleTime, setScheduleTime] = useState("09:00");
+
+  // Sources (per-post)
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [adhocSources, setAdhocSources] = useState<{ id: string; type: "url" | "keyword" | "idea"; value: string }[]>([]);
+  const [newSourceType, setNewSourceType] = useState<"url" | "keyword" | "idea">("idea");
+  const [newSourceValue, setNewSourceValue] = useState("");
+
+  const { data: savedSources } = useQuery({
+    queryKey: ["content_sources", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("content_sources")
+        .select("*")
+        .eq("user_id", user!.id)
+        .eq("enabled", true)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const addAdhoc = () => {
+    const v = newSourceValue.trim();
+    if (!v) return;
+    setAdhocSources((p) => [...p, { id: crypto.randomUUID(), type: newSourceType, value: v }]);
+    setNewSourceValue("");
+  };
 
   const [busy, setBusy] = useState<string | null>(null);
 
