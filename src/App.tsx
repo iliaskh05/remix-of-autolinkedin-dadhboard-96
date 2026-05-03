@@ -12,6 +12,7 @@ import PostDetail from "./pages/PostDetail";
 import LinkedInCallback from "./pages/LinkedInCallback";
 import ImageStudio from "./pages/ImageStudio";
 import Auth from "./pages/Auth";
+import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,10 +25,11 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
+            <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/linkedin/callback" element={<LinkedInCallback />} />
             <Route element={<AuthGuard><Layout /></AuthGuard>}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/post/:id" element={<PostDetail />} />
               <Route path="/image-studio" element={<ImageStudio />} />
