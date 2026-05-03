@@ -177,6 +177,38 @@ const Composer = () => {
     }
   };
 
+  // ---- Automate (create recurring schedule from current recipe) ----
+  const createSchedule = useMutation({
+    mutationFn: async () => {
+      if (!user) throw new Error("Not authenticated");
+      if (!textPrompt.trim()) throw new Error("Le prompt IA est requis pour automatiser");
+      if (!autoName.trim()) throw new Error("Donne un nom au schedule");
+      if (!autoDays.length) throw new Error("Choisis au moins un jour");
+      const { error } = await supabase.from("schedules").insert({
+        user_id: user.id,
+        name: autoName.trim(),
+        prompt: textPrompt,
+        saved_source_ids: selectedSourceIds,
+        adhoc_sources: adhocSources.map(({ type, value }) => ({ type, value })),
+        days_of_week: autoDays,
+        hour: autoHour,
+        minute: autoMinute,
+        timezone: autoTz,
+        image_mode: includeImage && imageMode === "ai" ? "ai" : "none",
+        image_prompt: includeImage && imageMode === "ai" ? (imagePrompt || null) : null,
+        enabled: true,
+        next_run_at: computeNextRunISO(autoDays, autoHour, autoMinute, autoTz),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Automatisation créée 🎯", description: "Le post sera généré et publié automatiquement." });
+      setAutoOpen(false);
+      navigate("/schedules");
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
   // ---- Save / Publish / Schedule ----
   const submit = async (action: "draft" | "publish" | "schedule") => {
     if (!user) return;
