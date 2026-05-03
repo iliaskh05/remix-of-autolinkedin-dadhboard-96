@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,33 @@ const Settings = () => {
   const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>({});
   const [isConnecting, setIsConnecting] = useState(false);
+
+  useEffect(() => {
+    const handleLinkedInOAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== "linkedin-oauth-result") return;
+
+      setIsConnecting(false);
+
+      if (event.data.success) {
+        queryClient.invalidateQueries({ queryKey: ["settings"] });
+        toast({
+          title: "LinkedIn connected",
+          description: "Your LinkedIn session has been refreshed.",
+        });
+        return;
+      }
+
+      toast({
+        title: "Connection failed",
+        description: event.data.error || "LinkedIn authorization failed.",
+        variant: "destructive",
+      });
+    };
+
+    window.addEventListener("message", handleLinkedInOAuthMessage);
+    return () => window.removeEventListener("message", handleLinkedInOAuthMessage);
+  }, [queryClient, toast]);
 
   const { isLoading } = useQuery({
     queryKey: ["settings"],
@@ -82,8 +109,16 @@ const Settings = () => {
       if (error) throw error;
       if (!data.success) throw new Error(data.error);
       
-      // Redirect to LinkedIn authorization page
-      window.location.href = data.authUrl;
+      const popup = window.open(
+        data.authUrl,
+        "linkedin-oauth",
+        "popup=yes,width=720,height=820,noopener,noreferrer"
+      );
+
+      if (!popup) {
+        setIsConnecting(false);
+        throw new Error("Popup blocked. Please allow popups for this site and try again.");
+      }
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to start OAuth", variant: "destructive" });
       setIsConnecting(false);
