@@ -77,6 +77,7 @@ export type Database = {
           linkedin_post_id: string | null
           news_summary: string | null
           published_at: string | null
+          scheduled_at: string | null
           status: string
           title: string
           user_id: string | null
@@ -89,6 +90,7 @@ export type Database = {
           linkedin_post_id?: string | null
           news_summary?: string | null
           published_at?: string | null
+          scheduled_at?: string | null
           status?: string
           title: string
           user_id?: string | null
@@ -101,6 +103,7 @@ export type Database = {
           linkedin_post_id?: string | null
           news_summary?: string | null
           published_at?: string | null
+          scheduled_at?: string | null
           status?: string
           title?: string
           user_id?: string | null

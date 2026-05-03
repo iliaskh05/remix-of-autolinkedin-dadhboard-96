@@ -1,0 +1,439 @@
+import { useState, useRef, useMemo } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Sparkles, Wand2, Image as ImageIcon, Upload, Send, Save, Loader2,
+  CalendarIcon, X, Type, RefreshCw, Linkedin
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type Mode = "ai" | "manual";
+
+const Composer = () => {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Text
+  const [textMode, setTextMode] = useState<Mode>("ai");
+  const [textPrompt, setTextPrompt] = useState("");
+  const [content, setContent] = useState("");
+  const [title, setTitle] = useState("");
+
+  // Image
+  const [imageMode, setImageMode] = useState<Mode>("ai");
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [includeImage, setIncludeImage] = useState(true);
+
+  // Schedule
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const charCount = content.length;
+  const scheduledISO = useMemo(() => {
+    if (!scheduleEnabled || !scheduleDate) return null;
+    const [h, m] = scheduleTime.split(":").map(Number);
+    const d = new Date(scheduleDate);
+    d.setHours(h || 0, m || 0, 0, 0);
+    return d.toISOString();
+  }, [scheduleEnabled, scheduleDate, scheduleTime]);
+
+  // ---- AI text ----
+  const generateText = useMutation({
+    mutationFn: async (mode: "create" | "improve") => {
+      setBusy("text");
+      const { data, error } = await supabase.functions.invoke("compose-text", {
+        body: {
+          prompt: textPrompt,
+          currentText: mode === "improve" ? content : undefined,
+          imageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
+          mode,
+        },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed");
+      return data;
+    },
+    onSuccess: (d) => {
+      setContent(d.content);
+      if (!title) setTitle(d.title);
+      toast({ title: "Texte généré ✨" });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onSettled: () => setBusy(null),
+  });
+
+  // ---- AI image ----
+  const generateImage = useMutation({
+    mutationFn: async () => {
+      setBusy("image");
+      const { data, error } = await supabase.functions.invoke("generate-image", {
+        body: {
+          prompt: imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
+          inputImageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
+          bottomMarginPercent: 0,
+        },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed");
+      return data.imageUrl as string;
+    },
+    onSuccess: (url) => {
+      setImageUrl(url);
+      toast({ title: "Image générée ✨" });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onSettled: () => setBusy(null),
+  });
+
+  // ---- Manual upload ----
+  const uploadImage = async (file: File) => {
+    if (!user) return;
+    setBusy("upload");
+    try {
+      const ext = file.name.split(".").pop() || "png";
+      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from("post-assets").upload(path, file, {
+        contentType: file.type, upsert: false,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from("post-assets").getPublicUrl(path);
+      setImageUrl(data.publicUrl);
+      toast({ title: "Image téléversée" });
+    } catch (e: any) {
+      toast({ title: "Erreur upload", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // ---- Save / Publish / Schedule ----
+  const submit = async (action: "draft" | "publish" | "schedule") => {
+    if (!user) return;
+    if (!content.trim()) {
+      toast({ title: "Le contenu est requis", variant: "destructive" });
+      return;
+    }
+    if (action === "schedule" && !scheduledISO) {
+      toast({ title: "Choisis une date et une heure", variant: "destructive" });
+      return;
+    }
+    setBusy(action);
+    try {
+      const status = action === "publish" ? "ready" : action === "schedule" ? "scheduled" : "draft";
+      const { data: saved, error } = await supabase.from("posts").insert({
+        user_id: user.id,
+        title: title || content.slice(0, 60),
+        content,
+        image_url: includeImage ? imageUrl : null,
+        status,
+        scheduled_at: action === "schedule" ? scheduledISO : null,
+      }).select().single();
+      if (error) throw error;
+
+      if (action === "publish") {
+        const { data: pub, error: pubErr } = await supabase.functions.invoke("publish-linkedin", {
+          body: { postId: saved.id },
+        });
+        if (pubErr) throw pubErr;
+        if (!pub?.success) throw new Error(pub?.error || "Publish failed");
+        toast({ title: "Publié sur LinkedIn 🎉" });
+      } else if (action === "schedule") {
+        toast({ title: "Programmé", description: `Sera publié le ${format(new Date(scheduledISO!), "PPp")}` });
+      } else {
+        toast({ title: "Brouillon enregistré" });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+      // reset
+      setContent(""); setTitle(""); setImageUrl(null); setTextPrompt(""); setImagePrompt("");
+      setScheduleEnabled(false); setScheduleDate(undefined);
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="p-8 max-w-7xl mx-auto animate-fade-in-up">
+      <div className="mb-8">
+        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Compose</div>
+        <h1 className="text-4xl font-semibold tracking-tight">
+          Crée ton <span className="text-gradient">prochain post</span>
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Texte et image — IA, manuel, ou les deux. Programme la publication ou poste tout de suite.
+        </p>
+      </div>
+
+      <div className="grid lg:grid-cols-[1fr_420px] gap-6">
+        {/* LEFT: editors */}
+        <div className="space-y-6">
+          {/* TEXT block */}
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Type className="h-4 w-4 text-primary" /> Texte du post
+              </CardTitle>
+              <Tabs value={textMode} onValueChange={(v) => setTextMode(v as Mode)}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="ai" className="text-xs gap-1"><Sparkles className="h-3 w-3" />IA</TabsTrigger>
+                  <TabsTrigger value="manual" className="text-xs gap-1"><Type className="h-3 w-3" />Manuel</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              {textMode === "ai" && (
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Sujet / instructions</Label>
+                  <Textarea
+                    value={textPrompt}
+                    onChange={(e) => setTextPrompt(e.target.value)}
+                    placeholder="Ex : un retour d'expérience sur le launch d'un nouveau produit SaaS B2B…"
+                    rows={3}
+                    className="bg-background/40"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => generateText.mutate("create")}
+                      disabled={busy === "text"}
+                      className="bg-gradient-to-r from-primary to-accent text-white"
+                    >
+                      {busy === "text" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      Générer
+                    </Button>
+                    {content && (
+                      <Button
+                        variant="outline"
+                        onClick={() => generateText.mutate("improve")}
+                        disabled={busy === "text"}
+                      >
+                        <RefreshCw className="h-4 w-4" /> Améliorer le brouillon
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Contenu</Label>
+                  <span className={cn("text-xs", charCount > 3000 ? "text-destructive" : "text-muted-foreground")}>
+                    {charCount} / 3000
+                  </span>
+                </div>
+                <Textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Écris ton post ici, ou laisse l'IA générer…"
+                  rows={12}
+                  className="bg-background/40 font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Titre interne (optionnel)</Label>
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pour t'y retrouver dans l'historique" className="bg-background/40" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* IMAGE block */}
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ImageIcon className="h-4 w-4 text-primary" /> Image
+                <Switch checked={includeImage} onCheckedChange={setIncludeImage} className="ml-2" />
+              </CardTitle>
+              <Tabs value={imageMode} onValueChange={(v) => setImageMode(v as Mode)}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="ai" className="text-xs gap-1"><Sparkles className="h-3 w-3" />IA</TabsTrigger>
+                  <TabsTrigger value="manual" className="text-xs gap-1"><Upload className="h-3 w-3" />Upload</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </CardHeader>
+            {includeImage && (
+              <CardContent className="p-5 space-y-4">
+                {imageMode === "ai" ? (
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Prompt image</Label>
+                    <Textarea
+                      value={imagePrompt}
+                      onChange={(e) => setImagePrompt(e.target.value)}
+                      placeholder="Ex : illustration éditoriale minimaliste, dégradé bleu-violet, abstrait…"
+                      rows={2}
+                      className="bg-background/40"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => generateImage.mutate()}
+                        disabled={busy === "image"}
+                        className="bg-gradient-to-r from-primary to-accent text-white"
+                      >
+                        {busy === "image" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {imageUrl ? "Régénérer" : "Générer l'image"}
+                      </Button>
+                      {imageUrl && (
+                        <Button variant="outline" onClick={() => setImageUrl(null)}>
+                          <X className="h-4 w-4" /> Retirer
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])}
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={busy === "upload"}
+                      className="w-full border-dashed h-32"
+                    >
+                      {busy === "upload" ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                        <div className="flex flex-col items-center gap-2">
+                          <Upload className="h-5 w-5" />
+                          <span className="text-sm">{imageUrl ? "Remplacer l'image" : "Téléverser une image"}</span>
+                        </div>
+                      )}
+                    </Button>
+                  </div>
+                )}
+
+                {imageUrl && (
+                  <div className="rounded-xl overflow-hidden ring-1 ring-border/50 bg-background/30">
+                    <img src={imageUrl} alt="preview" className="w-full max-h-80 object-contain" />
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        </div>
+
+        {/* RIGHT: preview + actions */}
+        <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl overflow-hidden">
+            <CardHeader className="border-b border-border/40">
+              <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground">
+                <Linkedin className="h-4 w-4 text-[#0A66C2]" /> Aperçu LinkedIn
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 bg-white text-neutral-900">
+              <div className="p-4 flex items-center gap-3 border-b border-neutral-200">
+                <div className="h-11 w-11 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white font-semibold">
+                  {user?.email?.[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{user?.email?.split("@")[0]}</p>
+                  <p className="text-xs text-neutral-500">À l'instant · 🌐</p>
+                </div>
+              </div>
+              <div className="px-4 py-3 text-sm whitespace-pre-wrap min-h-[80px]">
+                {content || <span className="text-neutral-400">Ton post apparaîtra ici…</span>}
+              </div>
+              {includeImage && imageUrl && (
+                <div className="border-t border-neutral-200">
+                  <img src={imageUrl} alt="" className="w-full max-h-80 object-cover" />
+                </div>
+              )}
+              <div className="px-4 py-2 border-t border-neutral-200 flex gap-6 text-xs text-neutral-500">
+                <span>👍 J'aime</span><span>💬 Commenter</span><span>↗ Partager</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Schedule */}
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 text-sm">
+                  <CalendarIcon className="h-4 w-4 text-primary" /> Programmer la publication
+                </Label>
+                <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} />
+              </div>
+              {scheduleEnabled && (
+                <div className="space-y-2 animate-fade-in-up">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className={cn("w-full justify-start", !scheduleDate && "text-muted-foreground")}>
+                        <CalendarIcon className="h-4 w-4" />
+                        {scheduleDate ? format(scheduleDate, "PPP") : "Choisir une date"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={scheduleDate}
+                        onSelect={setScheduleDate}
+                        disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
+                        initialFocus
+                        className={cn("p-3 pointer-events-auto")}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <Input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="bg-background/40" />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Actions */}
+          <div className="grid gap-2">
+            {scheduleEnabled ? (
+              <Button
+                onClick={() => submit("schedule")}
+                disabled={!!busy || !content.trim() || !scheduledISO}
+                className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                size="lg"
+              >
+                {busy === "schedule" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4" />}
+                Programmer
+              </Button>
+            ) : (
+              <Button
+                onClick={() => submit("publish")}
+                disabled={!!busy || !content.trim()}
+                className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                size="lg"
+              >
+                {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Publier maintenant
+              </Button>
+            )}
+            <Button
+              onClick={() => submit("draft")}
+              disabled={!!busy || !content.trim()}
+              variant="outline"
+            >
+              {busy === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Enregistrer en brouillon
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Composer;
