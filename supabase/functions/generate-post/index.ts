@@ -1,136 +1,116 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+type Settings = {
+  post_model: string;
+  use_byok: boolean;
+  openai_api_key: string | null;
+  gemini_api_key: string | null;
+  tone_instructions: string | null;
+};
+
+async function callAi(model: string, settings: Settings, messages: unknown[], tools: unknown[], toolName: string) {
+  let url = "https://ai.gateway.lovable.dev/v1/chat/completions";
+  let key = Deno.env.get("LOVABLE_API_KEY");
+
+  if (settings.use_byok) {
+    if (model.startsWith("openai/") && settings.openai_api_key) {
+      url = "https://api.openai.com/v1/chat/completions";
+      key = settings.openai_api_key;
+      model = model.replace("openai/", "");
+    } else if (model.startsWith("google/") && settings.gemini_api_key) {
+      // For Gemini BYOK, fall back to Lovable AI for compatibility (Gemini's REST API differs).
+      // Users can plug their own Gemini key via OpenAI-compatible proxies if needed.
+    }
   }
 
+  if (!key) throw new Error("No API key available");
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, tools, tool_choice: { type: "function", function: { name: toolName } } }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`AI call failed [${res.status}]: ${t}`);
+  }
+  return res.json();
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const { newsMarkdown } = await req.json();
-    if (!newsMarkdown) {
-      return new Response(
-        JSON.stringify({ success: false, error: "newsMarkdown is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    if (!newsMarkdown) return json(400, { success: false, error: "newsMarkdown required" });
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(
-        JSON.stringify({ success: false, error: "LOVABLE_API_KEY is not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const auth = req.headers.get("Authorization");
+    if (!auth) return json(401, { success: false, error: "Unauthorized" });
+    const { data: u } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const userId = u.user?.id;
+    if (!userId) return json(401, { success: false, error: "Unauthorized" });
 
-    console.log("Generating LinkedIn post from news...");
+    const { data: s } = await supabase.from("user_settings")
+      .select("post_model, use_byok, openai_api_key, gemini_api_key, tone_instructions")
+      .eq("user_id", userId).maybeSingle();
+    const settings: Settings = s as Settings ?? {
+      post_model: "google/gemini-3-flash-preview", use_byok: false,
+      openai_api_key: null, gemini_api_key: null, tone_instructions: null,
+    };
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are a professional commodity market analyst and LinkedIn content creator. 
-Your task is to analyze the latest commodity market news and create an engaging LinkedIn post.
-
+    const systemPrompt = `You are a professional content creator producing engaging LinkedIn posts.
 Rules:
-- Write in a professional but engaging tone
-- Include key market insights and trends
-- Add relevant hashtags (5-7)
-- Keep the post between 150-300 words
-- Use emojis sparingly but effectively
-- Include a call-to-action or question to boost engagement
-- Focus on the most impactful news items
+- Tone: professional yet engaging
+- 150-300 words
+- 5-7 relevant hashtags
+- Sparingly use emojis
+- End with a CTA / question
+${settings.tone_instructions ? `\nUser instructions:\n${settings.tone_instructions}` : ""}
 
-Return a JSON object with these fields:
-- title: A short title summarizing the main theme (max 10 words)
-- content: The full LinkedIn post text
-- newsSummary: A brief 2-3 sentence summary of the key news analyzed
-- imagePrompt: A description for generating a professional image to accompany this post (describe a business/finance themed image that relates to the commodity discussed)`
+Return JSON via the create_linkedin_post tool.`;
+
+    const data = await callAi(
+      settings.post_model,
+      settings,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Latest news/inspiration:\n\n${String(newsMarkdown).substring(0, 8000)}` },
+      ],
+      [{
+        type: "function",
+        function: {
+          name: "create_linkedin_post",
+          description: "Create a structured LinkedIn post",
+          parameters: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              content: { type: "string" },
+              newsSummary: { type: "string" },
+              imagePrompt: { type: "string" },
+            },
+            required: ["title", "content", "newsSummary", "imagePrompt"],
+            additionalProperties: false,
           },
-          {
-            role: "user",
-            content: `Here are the latest commodity market news from Barchart:\n\n${newsMarkdown.substring(0, 8000)}`
-          }
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "create_linkedin_post",
-              description: "Create a structured LinkedIn post from commodity news analysis",
-              parameters: {
-                type: "object",
-                properties: {
-                  title: { type: "string", description: "Short title for the post" },
-                  content: { type: "string", description: "Full LinkedIn post text with hashtags" },
-                  newsSummary: { type: "string", description: "Brief summary of analyzed news" },
-                  imagePrompt: { type: "string", description: "Image generation prompt for the post" }
-                },
-                required: ["title", "content", "newsSummary", "imagePrompt"],
-                additionalProperties: false
-              }
-            }
-          }
-        ],
-        tool_choice: { type: "function", function: { name: "create_linkedin_post" } }
-      }),
-    });
+        },
+      }],
+      "create_linkedin_post",
+    );
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Rate limit exceeded, please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Payment required. Please add funds to your Lovable AI workspace." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      const text = await response.text();
-      console.error("AI gateway error:", response.status, text);
-      return new Response(
-        JSON.stringify({ success: false, error: "AI generation failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const data = await response.json();
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    
-    if (!toolCall) {
-      console.error("No tool call in response:", JSON.stringify(data));
-      return new Response(
-        JSON.stringify({ success: false, error: "AI did not return structured data" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
+    if (!toolCall) return json(500, { success: false, error: "AI did not return structured data" });
     const postData = JSON.parse(toolCall.function.arguments);
-    console.log("Post generated successfully:", postData.title);
-
-    return new Response(
-      JSON.stringify({ success: true, ...postData }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    console.error("Error generating post:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Failed to generate post" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json(200, { success: true, ...postData });
+  } catch (e) {
+    console.error("generate-post error", e);
+    return json(500, { success: false, error: e instanceof Error ? e.message : "Failed" });
   }
 });

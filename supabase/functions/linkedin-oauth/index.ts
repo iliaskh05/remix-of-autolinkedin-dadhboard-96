@@ -6,133 +6,92 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+async function getUserId(req: Request, supabase: ReturnType<typeof createClient>): Promise<string | null> {
+  const auth = req.headers.get("Authorization");
+  if (!auth) return null;
+  const token = auth.replace("Bearer ", "");
+  const { data } = await supabase.auth.getUser(token);
+  return data.user?.id ?? null;
+}
+
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const { action, code, redirectUri } = await req.json();
-
-    const clientId = Deno.env.get("LINKEDIN_CLIENT_ID");
-    const clientSecret = Deno.env.get("LINKEDIN_CLIENT_SECRET");
-
-    if (!clientId || !clientSecret) {
-      return new Response(
-        JSON.stringify({ success: false, error: "LinkedIn app credentials not configured." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, serviceKey);
 
     if (action === "get_auth_url") {
-      // Generate the LinkedIn OAuth authorization URL
-      // Org scopes require LinkedIn Marketing Developer Platform approval.
-      // Default to personal posting scopes only to avoid OAuth "unauthorized_scope_error".
+      const userId = await getUserId(req, supabase);
+      if (!userId) return json(401, { success: false, error: "Unauthorized" });
+
+      const { data: settings } = await supabase
+        .from("user_settings").select("linkedin_client_id").eq("user_id", userId).maybeSingle();
+      const clientId = settings?.linkedin_client_id;
+      if (!clientId) return json(400, { success: false, error: "Set your LinkedIn Client ID in Settings first." });
+
       const scopes = "openid profile email w_member_social w_organization_social r_organization_social rw_organization_admin";
-      const state = crypto.randomUUID();
-      const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
-      
-      return new Response(
-        JSON.stringify({ success: true, authUrl, state }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // state encodes the user id so the callback can find which user is connecting
+      const state = `${userId}.${crypto.randomUUID()}`;
+      const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(state)}`;
+      return json(200, { success: true, authUrl, state });
     }
 
     if (action === "exchange_code") {
-      // Exchange authorization code for access token
+      const userId = await getUserId(req, supabase);
+      if (!userId) return json(401, { success: false, error: "Unauthorized" });
+
+      const { data: settings } = await supabase
+        .from("user_settings").select("linkedin_client_id, linkedin_client_secret").eq("user_id", userId).maybeSingle();
+      const clientId = settings?.linkedin_client_id;
+      const clientSecret = settings?.linkedin_client_secret;
+      if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
+
       const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: redirectUri,
-          client_id: clientId,
-          client_secret: clientSecret,
+          grant_type: "authorization_code", code, redirect_uri: redirectUri,
+          client_id: clientId, client_secret: clientSecret,
         }),
       });
-
       const tokenData = await tokenRes.json();
       if (!tokenRes.ok) {
         console.error("Token exchange error:", tokenData);
-        return new Response(
-          JSON.stringify({ success: false, error: tokenData.error_description || "Failed to get access token" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json(400, { success: false, error: tokenData.error_description || "Token exchange failed" });
       }
 
-      const accessToken = tokenData.access_token;
+      const accessToken = tokenData.access_token as string;
       const expiresAt = tokenData.expires_in
         ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
         : null;
 
-      // Get the user's profile to retrieve person URN
-      // Try /v2/userinfo first (OpenID Connect), fallback to /v2/me
       let personUrn = "";
-      
       const userinfoRes = await fetch("https://api.linkedin.com/v2/userinfo", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      
       if (userinfoRes.ok) {
-        const userinfoData = await userinfoRes.json();
-        console.log("Userinfo response:", JSON.stringify(userinfoData));
-        // sub is the member ID
-        if (userinfoData.sub) {
-          personUrn = `urn:li:person:${userinfoData.sub}`;
-        }
-      } else {
-        console.warn("Userinfo failed, trying /v2/me:", userinfoRes.status);
-        const profileRes = await fetch("https://api.linkedin.com/v2/me", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          personUrn = `urn:li:person:${profileData.id}`;
-        } else {
-          console.error("Both profile endpoints failed");
-        }
+        const u = await userinfoRes.json();
+        if (u.sub) personUrn = `urn:li:person:${u.sub}`;
       }
 
-      // Save credentials to app_settings
-      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-      const supabase = createClient(supabaseUrl, supabaseKey);
+      await supabase.from("user_settings").update({
+        linkedin_access_token: accessToken,
+        linkedin_token_expires_at: expiresAt,
+        linkedin_person_urn: personUrn || null,
+      }).eq("user_id", userId);
 
-      await supabase.from("app_settings").upsert(
-        { key: "linkedin_access_token", value: accessToken },
-        { onConflict: "key" }
-      );
-
-      if (expiresAt) {
-        await supabase.from("app_settings").upsert(
-          { key: "linkedin_access_token_expires_at", value: expiresAt },
-          { onConflict: "key" }
-        );
-      }
-
-      if (personUrn) {
-        await supabase.from("app_settings").upsert(
-          { key: "linkedin_person_urn", value: personUrn },
-          { onConflict: "key" }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, personUrn, expiresIn: tokenData.expires_in }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json(200, { success: true, personUrn, expiresIn: tokenData.expires_in });
     }
 
-    return new Response(
-      JSON.stringify({ success: false, error: "Invalid action" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json(400, { success: false, error: "Invalid action" });
   } catch (error) {
     console.error("LinkedIn OAuth error:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json(500, { success: false, error: error instanceof Error ? error.message : "Unknown error" });
   }
 });
