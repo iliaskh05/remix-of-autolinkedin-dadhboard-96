@@ -24,6 +24,7 @@ const App = () => (
             <Route path="/" element={<Dashboard />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/post/:id" element={<PostDetail />} />
+            <Route path="/image-studio" element={<ImageStudio />} />
             <Route path="/linkedin/callback" element={<LinkedInCallback />} />
           </Route>
           <Route path="*" element={<NotFound />} />
