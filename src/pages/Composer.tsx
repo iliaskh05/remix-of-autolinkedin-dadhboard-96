@@ -219,6 +219,120 @@ const Composer = () => {
       <div className="grid lg:grid-cols-[1fr_420px] gap-6">
         {/* LEFT: editors */}
         <div className="space-y-6">
+          {/* SOURCES block */}
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader className="border-b border-border/40">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-primary" /> Sources & inspirations
+                {(selectedSourceIds.length + adhocSources.length) > 0 && (
+                  <Badge variant="secondary" className="ml-1">
+                    {selectedSourceIds.length + adhocSources.length}
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Ajoute des URLs (scrapées via Firecrawl), des mots-clés (recherche web récente) ou des idées en texte libre.
+                L'IA s'en sert comme contexte pour rédiger le post.
+              </p>
+
+              {savedSources && savedSources.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <BookMarked className="h-3 w-3" /> Sources enregistrées
+                  </Label>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    {savedSources.map((src: any) => {
+                      const checked = selectedSourceIds.includes(src.id);
+                      return (
+                        <label
+                          key={src.id}
+                          className={cn(
+                            "flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition",
+                            checked
+                              ? "border-primary/60 bg-primary/5"
+                              : "border-border/40 bg-background/30 hover:bg-background/50"
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(c) =>
+                              setSelectedSourceIds((prev) =>
+                                c ? [...prev, src.id] : prev.filter((id) => id !== src.id)
+                              )
+                            }
+                          />
+                          {src.source_type === "url" ? (
+                            <Globe className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          ) : (
+                            <Hash className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="text-xs truncate">{src.label || src.value}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Ajout ponctuel (uniquement pour ce post)
+                </Label>
+                <div className="flex gap-2">
+                  <Tabs value={newSourceType} onValueChange={(v) => setNewSourceType(v as any)}>
+                    <TabsList className="h-9">
+                      <TabsTrigger value="idea" className="text-xs gap-1"><Lightbulb className="h-3 w-3" />Idée</TabsTrigger>
+                      <TabsTrigger value="url" className="text-xs gap-1"><Globe className="h-3 w-3" />URL</TabsTrigger>
+                      <TabsTrigger value="keyword" className="text-xs gap-1"><Hash className="h-3 w-3" />Mot-clé</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={newSourceValue}
+                    onChange={(e) => setNewSourceValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAdhoc(); } }}
+                    placeholder={
+                      newSourceType === "url"
+                        ? "https://exemple.com/article"
+                        : newSourceType === "keyword"
+                        ? "ex: AI agents 2026"
+                        : "ex: parler du parallèle entre design et code…"
+                    }
+                    className="bg-background/40"
+                  />
+                  <Button type="button" variant="outline" onClick={addAdhoc} disabled={!newSourceValue.trim()}>
+                    <Plus className="h-4 w-4" /> Ajouter
+                  </Button>
+                </div>
+
+                {adhocSources.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {adhocSources.map((s) => (
+                      <Badge
+                        key={s.id}
+                        variant="secondary"
+                        className="gap-1.5 pl-2 pr-1 py-1 max-w-full"
+                      >
+                        {s.type === "url" ? <Globe className="h-3 w-3" /> : s.type === "keyword" ? <Hash className="h-3 w-3" /> : <Lightbulb className="h-3 w-3" />}
+                        <span className="truncate max-w-[260px]">{s.value}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAdhocSources((p) => p.filter((x) => x.id !== s.id))}
+                          className="hover:bg-background/60 rounded p-0.5"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* TEXT block */}
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
