@@ -263,9 +263,12 @@ export type Database = {
       }
       user_settings: {
         Row: {
+          anthropic_api_key: string | null
           created_at: string
+          deepseek_api_key: string | null
           firecrawl_api_key: string | null
           gemini_api_key: string | null
+          groq_api_key: string | null
           image_model: string
           linkedin_access_token: string | null
           linkedin_client_id: string | null
@@ -273,17 +276,24 @@ export type Database = {
           linkedin_organization_id: string | null
           linkedin_person_urn: string | null
           linkedin_token_expires_at: string | null
+          mistral_api_key: string | null
           openai_api_key: string | null
+          openrouter_api_key: string | null
+          perplexity_api_key: string | null
           post_model: string
           tone_instructions: string | null
           updated_at: string
           use_byok: boolean
           user_id: string
+          xai_api_key: string | null
         }
         Insert: {
+          anthropic_api_key?: string | null
           created_at?: string
+          deepseek_api_key?: string | null
           firecrawl_api_key?: string | null
           gemini_api_key?: string | null
+          groq_api_key?: string | null
           image_model?: string
           linkedin_access_token?: string | null
           linkedin_client_id?: string | null
@@ -291,17 +301,24 @@ export type Database = {
           linkedin_organization_id?: string | null
           linkedin_person_urn?: string | null
           linkedin_token_expires_at?: string | null
+          mistral_api_key?: string | null
           openai_api_key?: string | null
+          openrouter_api_key?: string | null
+          perplexity_api_key?: string | null
           post_model?: string
           tone_instructions?: string | null
           updated_at?: string
           use_byok?: boolean
           user_id: string
+          xai_api_key?: string | null
         }
         Update: {
+          anthropic_api_key?: string | null
           created_at?: string
+          deepseek_api_key?: string | null
           firecrawl_api_key?: string | null
           gemini_api_key?: string | null
+          groq_api_key?: string | null
           image_model?: string
           linkedin_access_token?: string | null
           linkedin_client_id?: string | null
@@ -309,12 +326,16 @@ export type Database = {
           linkedin_organization_id?: string | null
           linkedin_person_urn?: string | null
           linkedin_token_expires_at?: string | null
+          mistral_api_key?: string | null
           openai_api_key?: string | null
+          openrouter_api_key?: string | null
+          perplexity_api_key?: string | null
           post_model?: string
           tone_instructions?: string | null
           updated_at?: string
           use_byok?: boolean
           user_id?: string
+          xai_api_key?: string | null
         }
         Relationships: []
       }
