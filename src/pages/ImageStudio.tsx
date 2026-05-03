@@ -1,28 +1,23 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Loader2, Sparkles, Download, Wand2, Palette, Type, Layout, Image as ImageIcon,
-  X, Plus, Star, Send, Upload, RefreshCw,
+  Sparkles, Palette, Type, Layout, Image as ImageIcon,
+  X, Plus, Star, Save, ArrowRight, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const MODELS = [
-  { value: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2 — rapide & qualité pro" },
-  { value: "google/gemini-2.5-flash-image", label: "Nano Banana — rapide & économique" },
-  { value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image — qualité max (lent)" },
-];
+import {
+  type ImagePrefs, DEFAULT_PREFS, FAV_KEY,
+  loadPrefs, savePrefs, loadPresets, savePresets, type Preset,
+} from "@/lib/imagePrefs";
 
 const STYLES = [
   { v: "modern editorial, clean composition, premium feel", label: "Éditorial" },
@@ -64,56 +59,43 @@ const PRESET_PALETTES = [
   { name: "Mono", colors: ["#000000", "#FFFFFF", "#888888"] },
 ];
 
-const FAV_KEY = "image-studio-favorites";
-
 const ImageStudio = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  // Subject
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState(MODELS[0].value);
-  const [aspectRatio, setAspectRatio] = useState(RATIOS[0].v);
-
-  // Style
-  const [style, setStyle] = useState(STYLES[0].v);
-  const [mood, setMood] = useState(MOODS[0].v);
-
-  // Colors
-  const [colors, setColors] = useState<string[]>(["#0A66C2", "#FFFFFF"]);
+  const [prefs, setPrefs] = useState<ImagePrefs>(DEFAULT_PREFS);
+  const [textEnabled, setTextEnabled] = useState(false);
+  const [wordmarkEnabled, setWordmarkEnabled] = useState(false);
   const [newColor, setNewColor] = useState("#3B82F6");
   const [favorites, setFavorites] = useState<{ name: string; colors: string[] }[]>([]);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [presetName, setPresetName] = useState("");
 
-  // Text overlay
-  const [textEnabled, setTextEnabled] = useState(false);
-  const [overlayText, setOverlayText] = useState("");
-  const [overlayPosition, setOverlayPosition] = useState("center");
-  const [overlayWeight, setOverlayWeight] = useState("bold");
-  const [overlayColor, setOverlayColor] = useState("#FFFFFF");
-
-  // Wordmark
-  const [wordmarkEnabled, setWordmarkEnabled] = useState(false);
-  const [wordmarkText, setWordmarkText] = useState("");
-  const [wordmarkPosition, setWordmarkPosition] = useState("bottom-center");
-
-  // Layout
-  const [margin, setMargin] = useState(0);
-
-  // Edit mode
-  const [inputImage, setInputImage] = useState<string | null>(null);
-
-  // Output
-  const [loading, setLoading] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
-
+  // Load
   useEffect(() => {
+    const p = loadPrefs();
+    setPrefs(p);
+    setTextEnabled(!!p.textOverlay);
+    setWordmarkEnabled(!!p.wordmark);
     try {
       const raw = localStorage.getItem(FAV_KEY);
       if (raw) setFavorites(JSON.parse(raw));
     } catch { /* noop */ }
+    setPresets(loadPresets());
   }, []);
+
+  // Auto-save on change
+  useEffect(() => {
+    const final: ImagePrefs = {
+      ...prefs,
+      textOverlay: textEnabled && prefs.textOverlay?.text ? prefs.textOverlay : undefined,
+      wordmark: wordmarkEnabled && prefs.wordmark?.text ? prefs.wordmark : undefined,
+    };
+    savePrefs(final);
+  }, [prefs, textEnabled, wordmarkEnabled]);
+
+  const setField = <K extends keyof ImagePrefs>(k: K, v: ImagePrefs[K]) =>
+    setPrefs((p) => ({ ...p, [k]: v }));
 
   const saveFavorites = (favs: typeof favorites) => {
     setFavorites(favs);
@@ -121,139 +103,79 @@ const ImageStudio = () => {
   };
 
   const addColor = () => {
-    if (colors.length >= 5) { toast({ title: "Max 5 couleurs", variant: "destructive" }); return; }
-    setColors((c) => [...c, newColor]);
+    if (prefs.colors.length >= 5) { toast({ title: "Max 5 couleurs", variant: "destructive" }); return; }
+    setField("colors", [...prefs.colors, newColor]);
   };
 
   const saveCurrentPalette = () => {
-    const name = prompt && prompt.length > 0 ? prompt.slice(0, 20) : `Palette ${favorites.length + 1}`;
-    saveFavorites([{ name, colors: [...colors] }, ...favorites].slice(0, 10));
+    const name = `Palette ${favorites.length + 1}`;
+    saveFavorites([{ name, colors: [...prefs.colors] }, ...favorites].slice(0, 10));
     toast({ title: "Palette sauvegardée ⭐" });
   };
 
-  const uploadInput = async (file: File) => {
-    const { data: session } = await supabase.auth.getUser();
-    const userId = session.user?.id;
-    if (!userId) return;
-    const path = `${userId}/${crypto.randomUUID()}.${file.name.split(".").pop() || "png"}`;
-    const { error } = await supabase.storage.from("post-assets").upload(path, file, { contentType: file.type });
-    if (error) { toast({ title: "Upload échoué", variant: "destructive" }); return; }
-    const { data } = supabase.storage.from("post-assets").getPublicUrl(path);
-    setInputImage(data.publicUrl);
-    toast({ title: "Image source chargée" });
+  const saveAsPreset = () => {
+    const name = presetName.trim() || `Préréglage ${presets.length + 1}`;
+    const next = [{ name, prefs }, ...presets].slice(0, 12);
+    setPresets(next);
+    savePresets(next);
+    setPresetName("");
+    toast({ title: "Préréglage sauvegardé 🎨" });
   };
 
-  const generate = async () => {
-    if (!prompt.trim() && !inputImage) {
-      toast({ title: "Prompt ou image source requis", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("generate-image", {
-        body: {
-          prompt: prompt || "Refine this image.",
-          model,
-          aspectRatio,
-          style,
-          mood,
-          colors,
-          bottomMarginPercent: margin,
-          inputImageUrl: inputImage,
-          textOverlay: textEnabled && overlayText.trim() ? {
-            text: overlayText.trim(),
-            position: overlayPosition,
-            weight: overlayWeight,
-            color: overlayColor,
-          } : undefined,
-          wordmark: wordmarkEnabled && wordmarkText.trim() ? {
-            text: wordmarkText.trim(),
-            position: wordmarkPosition,
-          } : undefined,
-        },
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Échec");
-      setImageUrl(data.imageUrl);
-      setHistory((h) => [data.imageUrl, ...h].slice(0, 8));
-      toast({ title: "Image générée ✨" });
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
+  const applyPreset = (p: Preset) => {
+    setPrefs(p.prefs);
+    setTextEnabled(!!p.prefs.textOverlay);
+    setWordmarkEnabled(!!p.prefs.wordmark);
+    toast({ title: `« ${p.name} » chargé` });
   };
 
-  const sendToComposer = () => {
-    if (!imageUrl) return;
-    sessionStorage.setItem("composer-image", imageUrl);
-    navigate("/composer");
+  const deletePreset = (i: number) => {
+    const next = presets.filter((_, j) => j !== i);
+    setPresets(next);
+    savePresets(next);
   };
 
-  const currentRatioCss = RATIOS.find((r) => r.v === aspectRatio)?.css || "aspect-square";
+  const reset = () => {
+    setPrefs(DEFAULT_PREFS);
+    setTextEnabled(false);
+    setWordmarkEnabled(false);
+    toast({ title: "Préférences réinitialisées" });
+  };
+
+  const previewRatioCss = RATIOS.find((r) => r.v === prefs.aspectRatio)?.css || "aspect-square";
 
   return (
     <div className="p-8 max-w-7xl mx-auto animate-fade-in-up">
       <div className="mb-8">
         <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Image Studio</div>
         <h1 className="text-4xl font-semibold tracking-tight">
-          Crée ton <span className="text-gradient">visuel parfait</span>
+          Tes <span className="text-gradient">préférences visuelles</span>
         </h1>
-        <p className="text-muted-foreground mt-2">Style, palette, texte intégré, position — contrôle total sur ton image.</p>
+        <p className="text-muted-foreground mt-2">
+          Configure ton style, palette, texte et marque. Le Composer utilisera ces réglages quand il génère ton image.
+        </p>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_460px] gap-6">
-        {/* LEFT: controls */}
+      <div className="grid lg:grid-cols-[1fr_400px] gap-6">
+        {/* LEFT: settings */}
         <div className="space-y-6">
-          {/* SUBJECT */}
+          {/* FORMAT */}
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="border-b border-border/40">
-              <CardTitle className="text-base flex items-center gap-2"><Wand2 className="h-4 w-4 text-primary" /> Sujet</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2"><ImageIcon className="h-4 w-4 text-primary" /> Format</CardTitle>
             </CardHeader>
-            <CardContent className="p-5 space-y-4">
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Décris l'image</Label>
-                <Textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Ex: une équipe diversifiée en réunion stratégique, vue plongeante, table en bois clair…"
-                  rows={3}
-                  className="bg-background/40 mt-1"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Modèle</Label>
-                  <Select value={model} onValueChange={setModel}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>{MODELS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Format</Label>
-                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>{RATIOS.map((r) => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Edit existing */}
-              <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-1 block">Image source (optionnel — mode édition)</Label>
-                <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && uploadInput(e.target.files[0])} />
-                {inputImage ? (
-                  <div className="relative inline-block">
-                    <img src={inputImage} alt="source" className="h-24 rounded-md border border-border/50" />
-                    <button onClick={() => setInputImage(null)} className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <Button variant="outline" onClick={() => fileRef.current?.click()} className="w-full border-dashed">
-                    <Upload className="h-4 w-4" /> Téléverser une image à éditer
-                  </Button>
-                )}
+            <CardContent className="p-5">
+              <div className="grid grid-cols-3 gap-2">
+                {RATIOS.map((r) => (
+                  <button
+                    key={r.v}
+                    onClick={() => setField("aspectRatio", r.v)}
+                    className={cn(
+                      "px-3 py-3 rounded-md text-sm border transition",
+                      prefs.aspectRatio === r.v ? "bg-primary text-primary-foreground border-primary" : "bg-background/40 hover:bg-accent border-border/40"
+                    )}
+                  >{r.label}</button>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -270,10 +192,10 @@ const ImageStudio = () => {
                   {STYLES.map((s) => (
                     <button
                       key={s.v}
-                      onClick={() => setStyle(s.v)}
+                      onClick={() => setField("style", s.v)}
                       className={cn(
                         "px-3 py-1.5 rounded-md text-sm border transition",
-                        style === s.v ? "bg-primary text-primary-foreground border-primary" : "bg-background/40 hover:bg-accent border-border/40"
+                        prefs.style === s.v ? "bg-primary text-primary-foreground border-primary" : "bg-background/40 hover:bg-accent border-border/40"
                       )}
                     >{s.label}</button>
                   ))}
@@ -285,10 +207,10 @@ const ImageStudio = () => {
                   {MOODS.map((m) => (
                     <button
                       key={m.v}
-                      onClick={() => setMood(m.v)}
+                      onClick={() => setField("mood", m.v)}
                       className={cn(
                         "px-3 py-1.5 rounded-md text-sm border transition",
-                        mood === m.v ? "bg-primary text-primary-foreground border-primary" : "bg-background/40 hover:bg-accent border-border/40"
+                        prefs.mood === m.v ? "bg-primary text-primary-foreground border-primary" : "bg-background/40 hover:bg-accent border-border/40"
                       )}
                     >{m.label}</button>
                   ))}
@@ -307,18 +229,18 @@ const ImageStudio = () => {
             </CardHeader>
             <CardContent className="p-5 space-y-4">
               <div>
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Couleurs actuelles ({colors.length}/5)</Label>
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Couleurs ({prefs.colors.length}/5)</Label>
                 <div className="flex flex-wrap gap-2">
-                  {colors.map((c, i) => (
+                  {prefs.colors.map((c, i) => (
                     <div key={i} className="relative group">
                       <input
                         type="color"
                         value={c}
-                        onChange={(e) => setColors((cur) => cur.map((x, j) => j === i ? e.target.value : x))}
+                        onChange={(e) => setField("colors", prefs.colors.map((x, j) => j === i ? e.target.value : x))}
                         className="h-12 w-12 rounded-md border border-border/50 cursor-pointer"
                       />
                       <button
-                        onClick={() => setColors((cur) => cur.filter((_, j) => j !== i))}
+                        onClick={() => setField("colors", prefs.colors.filter((_, j) => j !== i))}
                         className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"
                       ><X className="h-3 w-3" /></button>
                       <span className="block text-[10px] font-mono text-center text-muted-foreground mt-1">{c}</span>
@@ -335,7 +257,7 @@ const ImageStudio = () => {
                 <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Palettes prédéfinies</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {PRESET_PALETTES.map((p) => (
-                    <button key={p.name} onClick={() => setColors(p.colors)} className="border border-border/40 rounded-md p-2 hover:bg-accent transition text-left">
+                    <button key={p.name} onClick={() => setField("colors", p.colors)} className="border border-border/40 rounded-md p-2 hover:bg-accent transition text-left">
                       <div className="flex gap-1 mb-1">
                         {p.colors.map((c, i) => <div key={i} className="h-4 w-4 rounded" style={{ background: c }} />)}
                       </div>
@@ -351,7 +273,7 @@ const ImageStudio = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                     {favorites.map((f, i) => (
                       <div key={i} className="relative group">
-                        <button onClick={() => setColors(f.colors)} className="w-full border border-border/40 rounded-md p-2 hover:bg-accent transition text-left">
+                        <button onClick={() => setField("colors", f.colors)} className="w-full border border-border/40 rounded-md p-2 hover:bg-accent transition text-left">
                           <div className="flex gap-1 mb-1">
                             {f.colors.map((c, j) => <div key={j} className="h-4 w-4 rounded" style={{ background: c }} />)}
                           </div>
@@ -378,32 +300,41 @@ const ImageStudio = () => {
             {textEnabled && (
               <CardContent className="p-5 space-y-4">
                 <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Texte à afficher</Label>
-                  <Textarea value={overlayText} onChange={(e) => setOverlayText(e.target.value)} placeholder={`Ex: "L'IA change tout."`} rows={2} className="bg-background/40 mt-1" />
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Texte par défaut</Label>
+                  <Input
+                    value={prefs.textOverlay?.text || ""}
+                    onChange={(e) => setField("textOverlay", { ...(prefs.textOverlay || { position: "center", weight: "bold", color: "#FFFFFF" }), text: e.target.value })}
+                    placeholder={`Ex: "L'IA change tout."`}
+                    className="bg-background/40 mt-1"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">Tu pourras le surcharger dans le Composer pour chaque post.</p>
                 </div>
 
                 <div>
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Position dans l'image</Label>
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Position</Label>
                   <div className="inline-grid grid-cols-3 gap-1 p-2 rounded-md border border-border/40 bg-background/40">
                     {POSITIONS.flat().map((pos) => (
                       <button
                         key={pos}
-                        onClick={() => setOverlayPosition(pos)}
+                        onClick={() => setField("textOverlay", { ...(prefs.textOverlay || { text: "", weight: "bold", color: "#FFFFFF" }), position: pos })}
                         className={cn(
                           "h-9 w-12 rounded transition",
-                          overlayPosition === pos ? "bg-primary" : "bg-muted hover:bg-accent"
+                          prefs.textOverlay?.position === pos ? "bg-primary" : "bg-muted hover:bg-accent"
                         )}
                         title={pos}
                       />
                     ))}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">Position : <span className="font-mono">{overlayPosition}</span></p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Position : <span className="font-mono">{prefs.textOverlay?.position || "center"}</span></p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs uppercase tracking-wider text-muted-foreground">Style</Label>
-                    <Select value={overlayWeight} onValueChange={setOverlayWeight}>
+                    <Select
+                      value={prefs.textOverlay?.weight || "bold"}
+                      onValueChange={(v) => setField("textOverlay", { ...(prefs.textOverlay || { text: "", position: "center", color: "#FFFFFF" }), weight: v })}
+                    >
                       <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="bold">Gras</SelectItem>
@@ -417,7 +348,12 @@ const ImageStudio = () => {
                   </div>
                   <div>
                     <Label className="text-xs uppercase tracking-wider text-muted-foreground">Couleur</Label>
-                    <input type="color" value={overlayColor} onChange={(e) => setOverlayColor(e.target.value)} className="mt-1 h-10 w-full rounded-md border border-border/50 cursor-pointer" />
+                    <input
+                      type="color"
+                      value={prefs.textOverlay?.color || "#FFFFFF"}
+                      onChange={(e) => setField("textOverlay", { ...(prefs.textOverlay || { text: "", position: "center", weight: "bold" }), color: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-md border border-border/50 cursor-pointer"
+                    />
                   </div>
                 </div>
               </CardContent>
@@ -436,8 +372,16 @@ const ImageStudio = () => {
               </div>
               {wordmarkEnabled && (
                 <div className="grid grid-cols-2 gap-3">
-                  <Input value={wordmarkText} onChange={(e) => setWordmarkText(e.target.value)} placeholder="ex: TonNom" className="bg-background/40" />
-                  <Select value={wordmarkPosition} onValueChange={setWordmarkPosition}>
+                  <Input
+                    value={prefs.wordmark?.text || ""}
+                    onChange={(e) => setField("wordmark", { ...(prefs.wordmark || { position: "bottom-center" }), text: e.target.value })}
+                    placeholder="ex: TonNom"
+                    className="bg-background/40"
+                  />
+                  <Select
+                    value={prefs.wordmark?.position || "bottom-center"}
+                    onValueChange={(v) => setField("wordmark", { ...(prefs.wordmark || { text: "" }), position: v })}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {POSITIONS.flat().map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -449,91 +393,103 @@ const ImageStudio = () => {
               <div className="space-y-2 pt-2 border-t border-border/40">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Marge basse vide</Label>
-                  <span className="text-sm font-mono text-muted-foreground">{margin}%</span>
+                  <span className="text-sm font-mono text-muted-foreground">{prefs.bottomMarginPercent}%</span>
                 </div>
-                <Slider value={[margin]} onValueChange={(v) => setMargin(v[0])} min={0} max={25} step={1} />
+                <Slider value={[prefs.bottomMarginPercent]} onValueChange={(v) => setField("bottomMarginPercent", v[0])} min={0} max={25} step={1} />
                 <p className="text-[11px] text-muted-foreground">Réserve un espace en bas (utile si tu superposes du texte plus tard).</p>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* RIGHT: preview */}
+        {/* RIGHT: recap + presets */}
         <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl overflow-hidden">
-            <CardHeader className="border-b border-border/40">
-              <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground">
-                <ImageIcon className="h-4 w-4" /> Aperçu
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4">
-              <div className={cn("w-full rounded-lg overflow-hidden bg-muted flex items-center justify-center", currentRatioCss)}>
-                {loading ? (
-                  <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                    <span className="text-xs">Génération en cours…</span>
-                  </div>
-                ) : imageUrl ? (
-                  <img src={imageUrl} alt="generated" className="w-full h-full object-cover" />
-                ) : (
-                  <p className="text-sm text-muted-foreground">L'aperçu apparaîtra ici</p>
-                )}
-              </div>
-
-              <div className="mt-4 grid gap-2">
-                <Button onClick={generate} disabled={loading} size="lg" className="bg-gradient-to-r from-primary to-accent text-white glow-primary">
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : imageUrl ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                  {imageUrl ? "Régénérer" : "Générer l'image"}
-                </Button>
-                {imageUrl && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" onClick={sendToComposer}>
-                      <Send className="h-4 w-4" /> Envoyer au Composer
-                    </Button>
-                    <Button asChild variant="outline">
-                      <a href={imageUrl} download target="_blank" rel="noreferrer">
-                        <Download className="h-4 w-4" /> Télécharger
-                      </a>
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Active config recap */}
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-            <CardContent className="p-4 space-y-2">
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Configuration active</div>
-              <div className="flex flex-wrap gap-1.5">
-                <Badge variant="outline">{RATIOS.find((r) => r.v === aspectRatio)?.label}</Badge>
-                <Badge variant="outline">{STYLES.find((s) => s.v === style)?.label}</Badge>
-                <Badge variant="outline">{MOODS.find((m) => m.v === mood)?.label}</Badge>
-                {textEnabled && overlayText && <Badge variant="outline">Texte: {overlayPosition}</Badge>}
-                {wordmarkEnabled && wordmarkText && <Badge variant="outline">© {wordmarkText}</Badge>}
-                {colors.map((c, i) => <span key={i} className="h-5 w-5 rounded border border-border/50" style={{ background: c }} />)}
+            <CardHeader className="border-b border-border/40">
+              <CardTitle className="text-sm text-muted-foreground">Configuration active</CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <div className={cn("w-full rounded-lg overflow-hidden bg-muted relative flex items-center justify-center", previewRatioCss)}
+                style={{
+                  background: `linear-gradient(135deg, ${prefs.colors.join(", ")})`,
+                }}
+              >
+                {textEnabled && prefs.textOverlay?.text && (
+                  <div
+                    className={cn(
+                      "absolute px-3 text-center font-bold",
+                      prefs.textOverlay.position.includes("top") && "top-3",
+                      prefs.textOverlay.position.includes("bottom") && "bottom-3",
+                      !prefs.textOverlay.position.includes("top") && !prefs.textOverlay.position.includes("bottom") && "top-1/2 -translate-y-1/2",
+                      prefs.textOverlay.position.includes("left") && "left-3 text-left",
+                      prefs.textOverlay.position.includes("right") && "right-3 text-right",
+                      prefs.textOverlay.position.includes("center") && "left-1/2 -translate-x-1/2",
+                    )}
+                    style={{ color: prefs.textOverlay.color }}
+                  >
+                    {prefs.textOverlay.text}
+                  </div>
+                )}
+                {wordmarkEnabled && prefs.wordmark?.text && (
+                  <div className="absolute bottom-2 right-3 text-xs opacity-70 text-white">© {prefs.wordmark.text}</div>
+                )}
               </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="outline">{RATIOS.find((r) => r.v === prefs.aspectRatio)?.label}</Badge>
+                <Badge variant="outline">{STYLES.find((s) => s.v === prefs.style)?.label}</Badge>
+                <Badge variant="outline">{MOODS.find((m) => m.v === prefs.mood)?.label}</Badge>
+                {textEnabled && prefs.textOverlay?.text && <Badge variant="outline">Texte</Badge>}
+                {wordmarkEnabled && prefs.wordmark?.text && <Badge variant="outline">© {prefs.wordmark.text}</Badge>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/40">
+                <Button onClick={() => navigate("/composer")} className="bg-gradient-to-r from-primary to-accent text-white">
+                  Aller au Composer <ArrowRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" onClick={reset}>
+                  <RotateCcw className="h-4 w-4" /> Réinitialiser
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                ✓ Préférences sauvegardées automatiquement. Le Composer les appliquera à chaque génération d'image.
+              </p>
             </CardContent>
           </Card>
 
-          {/* History */}
-          {history.length > 1 && (
-            <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Historique récent</CardTitle></CardHeader>
-              <CardContent className="p-4 pt-0">
-                <div className="grid grid-cols-4 gap-2">
-                  {history.map((url, i) => (
-                    <button key={i} onClick={() => setImageUrl(url)} className={cn(
-                      "aspect-square rounded-md overflow-hidden border-2 transition",
-                      imageUrl === url ? "border-primary" : "border-transparent hover:border-border"
-                    )}>
-                      <img src={url} alt="" className="w-full h-full object-cover" />
-                    </button>
+          {/* PRESETS */}
+          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
+            <CardHeader className="border-b border-border/40">
+              <CardTitle className="text-sm flex items-center gap-2"><Save className="h-4 w-4 text-primary" /> Préréglages</CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="ex: Style éditorial"
+                  className="bg-background/40"
+                />
+                <Button onClick={saveAsPreset} variant="outline">
+                  <Save className="h-4 w-4" />
+                </Button>
+              </div>
+              {presets.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sauvegarde tes configurations pour basculer entre styles.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {presets.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 border border-border/40 rounded-md p-2 hover:bg-accent transition">
+                      <button onClick={() => applyPreset(p)} className="text-sm text-left flex-1 truncate">{p.name}</button>
+                      <button onClick={() => deletePreset(i)} className="text-muted-foreground hover:text-destructive">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

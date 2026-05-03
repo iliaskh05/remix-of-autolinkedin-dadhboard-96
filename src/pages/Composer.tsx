@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
+import { loadPrefs } from "@/lib/imagePrefs";
 
 type Mode = "ai" | "manual";
 
@@ -88,17 +89,7 @@ const Composer = () => {
     },
   });
 
-  // Pickup image sent from Image Studio
-  useEffect(() => {
-    const fromStudio = sessionStorage.getItem("composer-image");
-    if (fromStudio) {
-      setImageUrl(fromStudio);
-      setImageMode("manual");
-      setIncludeImage(true);
-      sessionStorage.removeItem("composer-image");
-      toast({ title: "Image importée depuis Image Studio" });
-    }
-  }, []);
+  // (Image Studio is now a preferences editor — no image is sent over.)
 
   const addAdhoc = () => {
     const v = newSourceValue.trim();
@@ -149,11 +140,18 @@ const Composer = () => {
   const generateImage = useMutation({
     mutationFn: async () => {
       setBusy("image");
+      const prefs = loadPrefs();
       const { data, error } = await supabase.functions.invoke("generate-image", {
         body: {
           prompt: imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
           inputImageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
-          bottomMarginPercent: 0,
+          aspectRatio: prefs.aspectRatio,
+          style: prefs.style,
+          mood: prefs.mood,
+          colors: prefs.colors,
+          bottomMarginPercent: prefs.bottomMarginPercent,
+          textOverlay: prefs.textOverlay,
+          wordmark: prefs.wordmark,
         },
       });
       if (error) throw error;
@@ -491,6 +489,10 @@ const Composer = () => {
                       rows={2}
                       className="bg-background/40"
                     />
+                    <p className="text-[11px] text-muted-foreground">
+                      Style, palette, texte intégré → définis tes préférences dans{" "}
+                      <button onClick={() => navigate("/image-studio")} className="text-primary hover:underline">Image Studio</button>.
+                    </p>
                     <div className="flex gap-2">
                       <Button
                         onClick={() => generateImage.mutate()}
