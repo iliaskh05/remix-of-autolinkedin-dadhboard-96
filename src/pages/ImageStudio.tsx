@@ -93,6 +93,22 @@ const ImageStudio = () => {
               </p>
             </div>
 
+            <div className="space-y-2">
+              <Label>Modèle Lovable AI</Label>
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODELS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <Button onClick={generate} disabled={loading} className="w-full" size="lg">
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
