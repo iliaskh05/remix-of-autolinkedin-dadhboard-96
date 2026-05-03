@@ -243,7 +243,5 @@ const Dashboard = () => {
   );
 };
 
-import { Zap, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export default Dashboard;
