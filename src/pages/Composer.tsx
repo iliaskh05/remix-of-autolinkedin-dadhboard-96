@@ -401,6 +401,7 @@ const Composer = () => {
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base flex items-center gap-2">
+                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">2</span>
                 <Type className="h-4 w-4 text-primary" /> Texte du post
               </CardTitle>
               <Tabs value={textMode} onValueChange={(v) => setTextMode(v as Mode)}>
@@ -468,6 +469,7 @@ const Composer = () => {
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base flex items-center gap-2">
+                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">3</span>
                 <ImageIcon className="h-4 w-4 text-primary" /> Image
                 <Switch checked={includeImage} onCheckedChange={setIncludeImage} className="ml-2" />
               </CardTitle>
