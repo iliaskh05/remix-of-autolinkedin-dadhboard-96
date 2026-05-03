@@ -628,11 +628,134 @@ const Composer = () => {
               {busy === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Enregistrer en brouillon
             </Button>
+
+            {/* Automate */}
+            <div className="pt-3 mt-1 border-t border-border/40">
+              <Button
+                onClick={() => { setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation"); setAutoOpen(true); }}
+                disabled={!canAutomate}
+                variant="outline"
+                className="w-full border-dashed"
+                title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un prompt"}
+              >
+                <Repeat className="h-4 w-4" />
+                Automatiser (publication récurrente)
+              </Button>
+              {!canAutomate && (
+                <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
+                  Pour automatiser, le texte doit être en mode IA (avec un prompt). Si une image est incluse, elle doit aussi être en mode IA.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Automation dialog */}
+      <Dialog open={autoOpen} onOpenChange={setAutoOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Repeat className="h-5 w-5 text-primary" /> Automatiser cette recette</DialogTitle>
+            <DialogDescription>
+              Le système re-générera et publiera un nouveau post à chaque exécution, en utilisant le prompt et les sources actuels.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Nom</Label>
+              <Input value={autoName} onChange={(e) => setAutoName(e.target.value)} placeholder="Ex: Veille IA hebdo" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Jours</Label>
+              <div className="flex gap-2 flex-wrap">
+                {DAYS.map((d) => {
+                  const active = autoDays.includes(d.v);
+                  return (
+                    <button
+                      key={d.v}
+                      type="button"
+                      onClick={() => setAutoDays((cur) => active ? cur.filter((x) => x !== d.v) : [...cur, d.v].sort())}
+                      className={cn(
+                        "px-3 py-1.5 rounded-md text-sm border transition",
+                        active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+                      )}
+                    >{d.label}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Heure</Label>
+                <Input type="number" min={0} max={23} value={autoHour}
+                  onChange={(e) => setAutoHour(Math.min(23, Math.max(0, +e.target.value || 0)))} />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Minute</Label>
+                <Input type="number" min={0} max={59} value={autoMinute}
+                  onChange={(e) => setAutoMinute(Math.min(59, Math.max(0, +e.target.value || 0)))} />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Timezone</Label>
+                <Select value={autoTz} onValueChange={setAutoTz}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Europe/Paris","Europe/London","Europe/Berlin","Europe/Madrid","America/New_York","America/Los_Angeles","Asia/Tokyo","Asia/Dubai","UTC"].map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="rounded-md border border-border/50 bg-background/40 p-3 text-xs space-y-1">
+              <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-3 w-3" /> Récapitulatif</div>
+              <p>• Texte : IA — prompt actuel</p>
+              <p>• Image : {includeImage && imageMode === "ai" ? "générée par IA à chaque run" : "aucune"}</p>
+              <p>• Sources : {selectedSourceIds.length + adhocSources.length} liée(s)</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAutoOpen(false)}>Annuler</Button>
+            <Button
+              onClick={() => createSchedule.mutate()}
+              disabled={createSchedule.isPending || !autoName.trim() || !autoDays.length}
+              className="bg-gradient-to-r from-primary to-accent text-white"
+            >
+              {createSchedule.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Repeat className="h-4 w-4" />}
+              Créer l'automatisation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
+
+// Mirror server-side computeNextRun
+function computeNextRunISO(days: number[], hour: number, minute: number, tz: string): string {
+  const now = new Date();
+  for (let i = 0; i < 14; i++) {
+    const c = new Date(now.getTime() + i * 86400000);
+    const wdName = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(c);
+    const wdMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+    if (!days.includes(wdMap[wdName])) continue;
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(c);
+    const [y, m, d] = parts.split("-").map(Number);
+    const local = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+    const asUTC = new Date(local + "Z").getTime();
+    const tzString = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(asUTC));
+    const mm = tzString.match(/(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2})/);
+    let offsetMin = 0;
+    if (mm) {
+      const tzAsUTC = Date.UTC(+mm[3], +mm[1] - 1, +mm[2], +mm[4], +mm[5]);
+      offsetMin = (asUTC - tzAsUTC) / 60000;
+    }
+    const target = new Date(asUTC + offsetMin * 60000);
+    if (target.getTime() > now.getTime()) return target.toISOString();
+  }
+  return new Date(now.getTime() + 86400000).toISOString();
+}
 
 export default Composer;
