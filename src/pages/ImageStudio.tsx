@@ -379,7 +379,7 @@ const ImageStudio = () => {
               <CardContent className="p-5 space-y-4">
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Texte à afficher</Label>
-                  <Textarea value={overlayText} onChange={(e) => setOverlayText(e.target.value)} placeholder='Ex: "L'IA change tout."' rows={2} className="bg-background/40 mt-1" />
+                  <Textarea value={overlayText} onChange={(e) => setOverlayText(e.target.value)} placeholder={`Ex: "L'IA change tout."`} rows={2} className="bg-background/40 mt-1" />
                 </div>
 
                 <div>
