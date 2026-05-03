@@ -75,11 +75,11 @@ serve(async (req) => {
       );
     }
 
-    // Always post as the authenticated person.
-    // Posting as an organization requires the `w_organization_social` scope
-    // (Marketing Developer Platform approval), which the current OAuth flow does not request.
-    void organizationId;
-    const authorUrn = personUrn;
+    // Post as organization page if organizationId is set, otherwise as person.
+    // Posting as an organization requires the `w_organization_social` scope.
+    const authorUrn = organizationId
+      ? `urn:li:organization:${organizationId.replace(/^urn:li:organization:/, "")}`
+      : personUrn;
 
     // If we have an image, upload it to LinkedIn first
     let imageAsset: string | null = null;
