@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, bottomMarginPercent } = await req.json();
+    const { prompt, bottomMarginPercent, model } = await req.json();
     if (!prompt) {
       return new Response(
         JSON.stringify({ success: false, error: "prompt is required" }),
@@ -20,6 +20,14 @@ serve(async (req) => {
       );
     }
     const margin = Math.min(Math.max(Number(bottomMarginPercent) || 14, 8), 25);
+    const ALLOWED_MODELS = [
+      "google/gemini-2.5-flash-image",
+      "google/gemini-3.1-flash-image-preview",
+      "google/gemini-3-pro-image-preview",
+    ];
+    const selectedModel = ALLOWED_MODELS.includes(model)
+      ? model
+      : "google/gemini-3.1-flash-image-preview";
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
