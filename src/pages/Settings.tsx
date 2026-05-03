@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Loader2, ExternalLink, Key, User, Link as LinkIcon, CheckCircle } from "lucide-react";
+import { Save, Loader2, ExternalLink, Key, User, Link as LinkIcon, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 const settingsFields = [
   {
@@ -126,6 +127,32 @@ const Settings = () => {
   };
 
   const hasCredentials = values.linkedin_access_token && values.linkedin_person_urn;
+  const expiresAtStr = values.linkedin_access_token_expires_at;
+  const expiresAt = expiresAtStr ? new Date(expiresAtStr) : null;
+  const isExpired = expiresAt ? expiresAt.getTime() < Date.now() : false;
+  const isConnected = hasCredentials && !isExpired;
+
+  const StatusBadge = () => {
+    if (!hasCredentials) {
+      return (
+        <Badge variant="outline" className="gap-1 border-muted-foreground/30 text-muted-foreground">
+          <XCircle className="h-3 w-3" /> Not connected
+        </Badge>
+      );
+    }
+    if (isExpired) {
+      return (
+        <Badge variant="destructive" className="gap-1">
+          <AlertTriangle className="h-3 w-3" /> Token expired
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="gap-1 bg-green-500/15 text-green-600 hover:bg-green-500/20 border border-green-500/30">
+        <CheckCircle className="h-3 w-3" /> Connected
+      </Badge>
+    );
+  };
 
   return (
     <div className="p-8 max-w-3xl mx-auto">
@@ -142,20 +169,35 @@ const Settings = () => {
           <CardTitle className="flex items-center gap-2">
             <LinkIcon className="h-5 w-5" />
             Connect LinkedIn Account
+            <div className="ml-auto"><StatusBadge /></div>
           </CardTitle>
           <CardDescription>
             The easiest way to connect — authorize via LinkedIn OAuth and we'll automatically get your access token and Person URN.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {hasCredentials ? (
-            <div className="flex items-center gap-3 p-4 rounded-lg bg-primary/5 border border-primary/20">
-              <CheckCircle className="h-5 w-5 text-primary flex-shrink-0" />
+          {isConnected ? (
+            <div className="flex items-center gap-3 p-4 rounded-lg bg-green-500/5 border border-green-500/20">
+              <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
               <div className="flex-1">
                 <p className="font-medium text-sm">LinkedIn Connected</p>
                 <p className="text-xs text-muted-foreground">Person URN: {values.linkedin_person_urn}</p>
+                {expiresAt && (
+                  <p className="text-xs text-muted-foreground">Token valid until {expiresAt.toLocaleString()}</p>
+                )}
               </div>
               <Button variant="outline" size="sm" onClick={handleConnectLinkedIn} disabled={isConnecting}>
+                {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reconnect"}
+              </Button>
+            </div>
+          ) : hasCredentials && isExpired ? (
+            <div className="flex items-center gap-3 p-4 rounded-lg bg-destructive/5 border border-destructive/20">
+              <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium text-sm">Token expired</p>
+                <p className="text-xs text-muted-foreground">Reconnect your LinkedIn account to publish again.</p>
+              </div>
+              <Button variant="default" size="sm" onClick={handleConnectLinkedIn} disabled={isConnecting}>
                 {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Reconnect"}
               </Button>
             </div>
@@ -174,6 +216,7 @@ const Settings = () => {
           <CardTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
             Manual Credentials
+            <div className="ml-auto"><StatusBadge /></div>
           </CardTitle>
           <CardDescription>
             Or enter your credentials manually if you already have an access token.
