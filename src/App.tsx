@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import PostDetail from "./pages/PostDetail";
 import LinkedInCallback from "./pages/LinkedInCallback";
+import ImageStudio from "./pages/ImageStudio";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
