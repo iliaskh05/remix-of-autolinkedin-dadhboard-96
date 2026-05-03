@@ -5,122 +5,82 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    const anonKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || supabaseKey;
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const auth = req.headers.get("Authorization");
+    if (!auth) return json(401, { success: false, error: "Unauthorized" });
+    const { data: u } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const userId = u.user?.id;
+    if (!userId) return json(401, { success: false, error: "Unauthorized" });
 
     const body = await req.json().catch(() => ({}));
     const autoPublish = body.autoPublish ?? false;
 
-    console.log("=== Starting LinkedIn Post Workflow ===");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    // Forward the user's JWT so downstream functions identify the user
+    const fwdHeaders = { Authorization: auth, "Content-Type": "application/json" };
 
-    // Step 1: Scrape news
-    console.log("Step 1: Scraping commodity news...");
+    // 1. scrape
     const scrapeRes = await fetch(`${supabaseUrl}/functions/v1/scrape-news`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${anonKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
+      method: "POST", headers: fwdHeaders, body: JSON.stringify({}),
     });
-    const scrapeData = await scrapeRes.json();
-    if (!scrapeData.success) {
-      throw new Error(`Scraping failed: ${scrapeData.error}`);
-    }
+    const scrape = await scrapeRes.json();
+    if (!scrape.success) throw new Error(`Scraping failed: ${scrape.error}`);
 
-    // Step 2: Generate post
-    console.log("Step 2: Generating LinkedIn post...");
+    // 2. generate post
     const postRes = await fetch(`${supabaseUrl}/functions/v1/generate-post`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${anonKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ newsMarkdown: scrapeData.markdown }),
+      method: "POST", headers: fwdHeaders, body: JSON.stringify({ newsMarkdown: scrape.markdown }),
     });
-    const postData = await postRes.json();
-    if (!postData.success) {
-      throw new Error(`Post generation failed: ${postData.error}`);
-    }
+    const post = await postRes.json();
+    if (!post.success) throw new Error(`Post gen failed: ${post.error}`);
 
-    // Step 3: Generate image
-    console.log("Step 3: Generating image...");
-    let imageUrl = null;
+    // 3. generate image
+    let imageUrl: string | null = null;
     try {
       const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-image`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${anonKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ prompt: postData.imagePrompt, bottomMarginPercent: 14 }),
+        method: "POST", headers: fwdHeaders,
+        body: JSON.stringify({ prompt: post.imagePrompt, bottomMarginPercent: 0 }),
       });
-      const imgData = await imgRes.json();
-      if (imgData.success) {
-        imageUrl = imgData.imageUrl;
-      } else {
-        console.warn("Image generation failed, continuing without image:", imgData.error);
-      }
-    } catch (imgErr) {
-      console.warn("Image generation error, continuing without image:", imgErr);
-    }
+      const img = await imgRes.json();
+      if (img.success) imageUrl = img.imageUrl;
+    } catch (e) { console.warn("img failed", e); }
 
-    // Step 4: Save to database
-    console.log("Step 4: Saving post to database...");
-    const { data: savedPost, error: insertError } = await supabase.from("posts").insert({
-      title: postData.title,
-      content: postData.content,
-      news_summary: postData.newsSummary,
+    // 4. save
+    const { data: saved, error: insErr } = await supabase.from("posts").insert({
+      user_id: userId,
+      title: post.title,
+      content: post.content,
+      news_summary: post.newsSummary,
       image_url: imageUrl,
       status: autoPublish ? "generating" : "ready",
     }).select().single();
+    if (insErr) throw new Error(insErr.message);
 
-    if (insertError) {
-      throw new Error(`Failed to save post: ${insertError.message}`);
-    }
-
-    // Step 5: Auto-publish if requested
-    if (autoPublish && savedPost) {
-      console.log("Step 5: Publishing to LinkedIn...");
+    // 5. auto publish
+    if (autoPublish && saved) {
       try {
-        const publishRes = await fetch(`${supabaseUrl}/functions/v1/publish-linkedin`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ postId: savedPost.id }),
+        const pubRes = await fetch(`${supabaseUrl}/functions/v1/publish-linkedin`, {
+          method: "POST", headers: fwdHeaders, body: JSON.stringify({ postId: saved.id }),
         });
-        const publishData = await publishRes.json();
-        if (!publishData.success) {
-          console.error("Auto-publish failed:", publishData.error);
-          await supabase.from("posts").update({ status: "ready" }).eq("id", savedPost.id);
+        const pub = await pubRes.json();
+        if (!pub.success) {
+          await supabase.from("posts").update({ status: "ready" }).eq("id", saved.id);
         }
-      } catch (pubErr) {
-        console.error("Auto-publish error:", pubErr);
-        await supabase.from("posts").update({ status: "ready" }).eq("id", savedPost.id);
+      } catch (e) {
+        console.error("auto-publish failed", e);
+        await supabase.from("posts").update({ status: "ready" }).eq("id", saved.id);
       }
     }
 
-    console.log("=== Workflow completed successfully ===");
-    return new Response(
-      JSON.stringify({ success: true, post: savedPost }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    console.error("Workflow error:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Workflow failed" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json(200, { success: true, post: saved });
+  } catch (e) {
+    console.error("workflow error", e);
+    return json(500, { success: false, error: e instanceof Error ? e.message : "Failed" });
   }
 });

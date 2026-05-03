@@ -5,195 +5,120 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const { postId } = await req.json();
-    if (!postId) {
-      return new Response(
-        JSON.stringify({ success: false, error: "postId is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    if (!postId) return json(400, { success: false, error: "postId required" });
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const auth = req.headers.get("Authorization");
+    if (!auth) return json(401, { success: false, error: "Unauthorized" });
+    const { data: u } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const userId = u.user?.id;
+    if (!userId) return json(401, { success: false, error: "Unauthorized" });
 
-    // Get post
-    const { data: post, error: postError } = await supabase
-      .from("posts")
-      .select("*")
-      .eq("id", postId)
-      .single();
+    const { data: post } = await supabase.from("posts").select("*").eq("id", postId).eq("user_id", userId).maybeSingle();
+    if (!post) return json(404, { success: false, error: "Post not found" });
 
-    if (postError || !post) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Post not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Get LinkedIn credentials from settings
     const { data: settings } = await supabase
-      .from("app_settings")
-      .select("key, value")
-      .in("key", ["linkedin_access_token", "linkedin_person_urn", "linkedin_organization_id", "linkedin_access_token_expires_at"]);
+      .from("user_settings")
+      .select("linkedin_access_token, linkedin_token_expires_at, linkedin_person_urn, linkedin_organization_id")
+      .eq("user_id", userId).maybeSingle();
 
-    const settingsMap: Record<string, string> = {};
-    settings?.forEach((s: { key: string; value: string }) => {
-      settingsMap[s.key] = s.value;
-    });
-
-    const accessToken = settingsMap.linkedin_access_token;
-    const personUrn = settingsMap.linkedin_person_urn;
-    const organizationId = settingsMap.linkedin_organization_id;
-    const tokenExpiresAt = settingsMap.linkedin_access_token_expires_at;
+    const accessToken = settings?.linkedin_access_token;
+    const personUrn = settings?.linkedin_person_urn;
+    const organizationId = settings?.linkedin_organization_id;
+    const expiresAt = settings?.linkedin_token_expires_at;
 
     if (!accessToken || !personUrn) {
-      return new Response(
-        JSON.stringify({ success: false, error: "LinkedIn credentials not configured. Go to Settings to add them." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json(400, { success: false, error: "LinkedIn not connected. Go to Settings." });
     }
-
-    if (tokenExpiresAt && Number.isFinite(Date.parse(tokenExpiresAt)) && Date.parse(tokenExpiresAt) <= Date.now()) {
+    if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
       await supabase.from("posts").update({ status: "ready" }).eq("id", postId);
-
-      return new Response(
-        JSON.stringify({
-          success: false,
-          code: "LINKEDIN_TOKEN_EXPIRED",
-          requiresReconnect: true,
-          error: "Your LinkedIn connection has expired. Reconnect your account in Settings, then try publishing again.",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json(200, {
+        success: false, code: "LINKEDIN_TOKEN_EXPIRED", requiresReconnect: true,
+        error: "Your LinkedIn connection has expired. Reconnect in Settings.",
+      });
     }
 
-    // Post as organization page if organizationId is set, otherwise as person.
-    // Posting as an organization requires the `w_organization_social` scope.
     const authorUrn = organizationId
       ? `urn:li:organization:${organizationId.replace(/^urn:li:organization:/, "")}`
       : personUrn;
 
-    // If we have an image, upload it to LinkedIn first
     let imageAsset: string | null = null;
     if (post.image_url && !post.image_url.startsWith("data:")) {
       try {
-        // Register upload
         const registerRes = await fetch("https://api.linkedin.com/v2/assets?action=registerUpload", {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             registerUploadRequest: {
               recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
               owner: authorUrn,
-              serviceRelationships: [
-                { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" }
-              ]
-            }
+              serviceRelationships: [{ relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" }],
+            },
           }),
         });
-
         if (registerRes.ok) {
-          const registerData = await registerRes.json();
-          const uploadUrl = registerData.value?.uploadMechanism?.["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]?.uploadUrl;
-          imageAsset = registerData.value?.asset;
-
+          const rd = await registerRes.json();
+          const uploadUrl = rd.value?.uploadMechanism?.["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]?.uploadUrl;
+          imageAsset = rd.value?.asset;
           if (uploadUrl) {
-            const imgResponse = await fetch(post.image_url);
-            const imgBlob = await imgResponse.blob();
-            await fetch(uploadUrl, {
-              method: "PUT",
-              headers: { Authorization: `Bearer ${accessToken}` },
-              body: imgBlob,
-            });
+            const blob = await (await fetch(post.image_url)).blob();
+            await fetch(uploadUrl, { method: "PUT", headers: { Authorization: `Bearer ${accessToken}` }, body: blob });
           }
         }
-      } catch (imgErr) {
-        console.error("Image upload to LinkedIn failed:", imgErr);
-      }
+      } catch (e) { console.error("img upload failed", e); }
     }
 
-    // Create the post
-    const postBody: Record<string, unknown> = {
+    const body = {
       author: authorUrn,
       lifecycleState: "PUBLISHED",
       specificContent: {
         "com.linkedin.ugc.ShareContent": {
           shareCommentary: { text: post.content },
           shareMediaCategory: imageAsset ? "IMAGE" : "NONE",
-          ...(imageAsset ? {
-            media: [{
-              status: "READY",
-              media: imageAsset,
-            }]
-          } : {})
-        }
+          ...(imageAsset ? { media: [{ status: "READY", media: imageAsset }] } : {}),
+        },
       },
-      visibility: {
-        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
-      }
+      visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
     };
 
-    const linkedinRes = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+    const liRes = await fetch("https://api.linkedin.com/v2/ugcPosts", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         "X-Restli-Protocol-Version": "2.0.0",
       },
-      body: JSON.stringify(postBody),
+      body: JSON.stringify(body),
     });
 
-    if (!linkedinRes.ok) {
-      const errText = await linkedinRes.text();
-      console.error("LinkedIn API error:", linkedinRes.status, errText);
-      
-      const invalidToken = linkedinRes.status === 401 && errText.includes("INVALID_ACCESS_TOKEN");
-      await supabase.from("posts").update({ status: invalidToken ? "ready" : "failed" }).eq("id", postId);
-      
-      return new Response(
-        JSON.stringify(
-          invalidToken
-            ? {
-                success: false,
-                code: "LINKEDIN_TOKEN_EXPIRED",
-                requiresReconnect: true,
-                error: "Your LinkedIn access token is no longer valid. Reconnect your account in Settings, then try again.",
-              }
-            : { success: false, error: `LinkedIn API error [${linkedinRes.status}]: ${errText}` }
-        ),
-        { status: invalidToken ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!liRes.ok) {
+      const errText = await liRes.text();
+      console.error("LinkedIn error:", liRes.status, errText);
+      const invalid = liRes.status === 401 && errText.includes("INVALID_ACCESS_TOKEN");
+      await supabase.from("posts").update({ status: invalid ? "ready" : "failed" }).eq("id", postId);
+      return json(invalid ? 200 : 500, invalid
+        ? { success: false, code: "LINKEDIN_TOKEN_EXPIRED", requiresReconnect: true, error: "Token invalid. Reconnect in Settings." }
+        : { success: false, error: `LinkedIn API error [${liRes.status}]: ${errText}` });
     }
 
-    const linkedinData = await linkedinRes.json();
-
+    const liData = await liRes.json();
     await supabase.from("posts").update({
       status: "published",
       published_at: new Date().toISOString(),
-      linkedin_post_id: linkedinData.id || null,
+      linkedin_post_id: liData.id || null,
     }).eq("id", postId);
 
-    console.log("Post published to LinkedIn:", linkedinData.id);
-    return new Response(
-      JSON.stringify({ success: true, linkedinPostId: linkedinData.id }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    console.error("Error publishing:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Failed to publish" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json(200, { success: true, linkedinPostId: liData.id });
+  } catch (e) {
+    console.error("publish error", e);
+    return json(500, { success: false, error: e instanceof Error ? e.message : "Failed" });
   }
 });

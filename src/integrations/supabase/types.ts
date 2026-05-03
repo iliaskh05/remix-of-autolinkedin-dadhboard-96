@@ -38,6 +38,36 @@ export type Database = {
         }
         Relationships: []
       }
+      content_sources: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          label: string | null
+          source_type: string
+          user_id: string
+          value: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          label?: string | null
+          source_type: string
+          user_id: string
+          value: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          label?: string | null
+          source_type?: string
+          user_id?: string
+          value?: string
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           content: string
@@ -49,6 +79,7 @@ export type Database = {
           published_at: string | null
           status: string
           title: string
+          user_id: string | null
         }
         Insert: {
           content: string
@@ -60,6 +91,7 @@ export type Database = {
           published_at?: string | null
           status?: string
           title: string
+          user_id?: string | null
         }
         Update: {
           content?: string
@@ -71,6 +103,88 @@ export type Database = {
           published_at?: string | null
           status?: string
           title?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          created_at: string
+          gemini_api_key: string | null
+          image_model: string
+          linkedin_access_token: string | null
+          linkedin_client_id: string | null
+          linkedin_client_secret: string | null
+          linkedin_organization_id: string | null
+          linkedin_person_urn: string | null
+          linkedin_token_expires_at: string | null
+          openai_api_key: string | null
+          post_model: string
+          tone_instructions: string | null
+          updated_at: string
+          use_byok: boolean
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          gemini_api_key?: string | null
+          image_model?: string
+          linkedin_access_token?: string | null
+          linkedin_client_id?: string | null
+          linkedin_client_secret?: string | null
+          linkedin_organization_id?: string | null
+          linkedin_person_urn?: string | null
+          linkedin_token_expires_at?: string | null
+          openai_api_key?: string | null
+          post_model?: string
+          tone_instructions?: string | null
+          updated_at?: string
+          use_byok?: boolean
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          gemini_api_key?: string | null
+          image_model?: string
+          linkedin_access_token?: string | null
+          linkedin_client_id?: string | null
+          linkedin_client_secret?: string | null
+          linkedin_organization_id?: string | null
+          linkedin_person_urn?: string | null
+          linkedin_token_expires_at?: string | null
+          openai_api_key?: string | null
+          post_model?: string
+          tone_instructions?: string | null
+          updated_at?: string
+          use_byok?: boolean
+          user_id?: string
         }
         Relationships: []
       }
