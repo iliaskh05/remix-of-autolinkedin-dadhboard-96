@@ -1,9 +1,10 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { BarChart3, Settings, Zap } from "lucide-react";
+import { BarChart3, Settings, Zap, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: BarChart3 },
+  { to: "/image-studio", label: "Image Studio", icon: ImageIcon },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
