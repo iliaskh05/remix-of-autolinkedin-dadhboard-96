@@ -268,24 +268,25 @@ const Composer = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto animate-fade-in-up">
+    <div className="p-6 lg:p-10 max-w-7xl mx-auto animate-fade-in-up">
       <div className="mb-8">
-        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Compose</div>
-        <h1 className="text-4xl font-semibold tracking-tight">
+        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Composer</div>
+        <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight">
           Crée ton <span className="text-gradient">prochain post</span>
         </h1>
         <p className="text-muted-foreground mt-2">
-          Texte et image — IA, manuel, ou les deux. Programme la publication ou poste tout de suite.
+          Trois étapes : nourris l'IA avec des sources, rédige le texte, ajoute l'image. Puis publie ou automatise.
         </p>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_420px] gap-6">
+      <div className="grid lg:grid-cols-[1fr_400px] gap-6">
         {/* LEFT: editors */}
         <div className="space-y-6">
           {/* SOURCES block */}
           <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
             <CardHeader className="border-b border-border/40">
               <CardTitle className="text-base flex items-center gap-2">
+                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">1</span>
                 <Lightbulb className="h-4 w-4 text-primary" /> Sources & inspirations
                 {(selectedSourceIds.length + adhocSources.length) > 0 && (
                   <Badge variant="secondary" className="ml-1">
