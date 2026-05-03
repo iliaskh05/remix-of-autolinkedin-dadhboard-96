@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: BarChart3 },
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { to: "/image-studio", label: "Image Studio", icon: ImageIcon },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
