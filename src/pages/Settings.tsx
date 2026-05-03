@@ -29,6 +29,7 @@ type UserSettings = {
   use_byok: boolean;
   openai_api_key: string | null;
   gemini_api_key: string | null;
+  firecrawl_api_key: string | null;
   tone_instructions: string | null;
 };
 
@@ -98,6 +99,7 @@ const Settings = () => {
         use_byok: s.use_byok,
         openai_api_key: s.openai_api_key,
         gemini_api_key: s.gemini_api_key,
+        firecrawl_api_key: s.firecrawl_api_key,
         tone_instructions: s.tone_instructions,
       }).eq("user_id", user.id);
       if (error) throw error;
@@ -318,19 +320,48 @@ const Settings = () => {
           <div className="flex items-center justify-between pt-2 border-t">
             <div>
               <Label>Bring your own API keys (BYOK)</Label>
-              <p className="text-xs text-muted-foreground">Use your own OpenAI / Gemini key instead of Lovable AI.</p>
+              <p className="text-xs text-muted-foreground">Utilise tes propres clés au lieu de Lovable AI / connecteurs partagés. Tu ne paies que ce que tu consommes chez chaque fournisseur.</p>
             </div>
             <Switch checked={s.use_byok} onCheckedChange={(v) => setS({ ...s, use_byok: v })} />
           </div>
           {s.use_byok && (
-            <div className="space-y-3 pl-4 border-l-2 border-primary/30">
-              <div className="space-y-1">
-                <Label>OpenAI API Key</Label>
-                <Input type="password" value={s.openai_api_key || ""} onChange={(e) => setS({ ...s, openai_api_key: e.target.value })} placeholder="sk-..." />
+            <div className="space-y-4 pl-4 border-l-2 border-primary/30">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Génération de texte</p>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <Label>OpenAI API Key</Label>
+                    <Input type="password" autoComplete="off" value={s.openai_api_key || ""} onChange={(e) => setS({ ...s, openai_api_key: e.target.value })} placeholder="sk-..." />
+                    <p className="text-[11px] text-muted-foreground">
+                      Couvre tous les modèles GPT-5 (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2). Récupère ta clé sur{" "}
+                      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">platform.openai.com</a>.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Google Gemini API Key</Label>
+                    <Input type="password" autoComplete="off" value={s.gemini_api_key || ""} onChange={(e) => setS({ ...s, gemini_api_key: e.target.value })} placeholder="AIza..." />
+                    <p className="text-[11px] text-muted-foreground">
+                      Couvre tous les modèles Gemini texte ET image (2.5 Pro/Flash/Lite, 3 Flash/Pro Preview, Nano Banana 1 & 2, Gemini 3 Pro Image). Récupère ta clé sur{" "}
+                      <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline">aistudio.google.com</a>.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Google Gemini API Key</Label>
-                <Input type="password" value={s.gemini_api_key || ""} onChange={(e) => setS({ ...s, gemini_api_key: e.target.value })} placeholder="AIza..." />
+
+              <div className="pt-3 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sources de contenu (web scraping & search)</p>
+                <div className="space-y-1">
+                  <Label>Firecrawl API Key</Label>
+                  <Input type="password" autoComplete="off" value={s.firecrawl_api_key || ""} onChange={(e) => setS({ ...s, firecrawl_api_key: e.target.value })} placeholder="fc-..." />
+                  <p className="text-[11px] text-muted-foreground">
+                    Utilisée pour scraper les URLs et faire les recherches web (mots-clés) dans tes Content Sources. Récupère ta clé sur{" "}
+                    <a href="https://www.firecrawl.dev/app/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">firecrawl.dev</a>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-md bg-muted/50 p-3 text-[11px] text-muted-foreground">
+                💡 Tu peux ne renseigner que certaines clés. Pour celles qui sont vides, l'app retombe automatiquement sur les services partagés Lovable.
               </div>
             </div>
           )}
