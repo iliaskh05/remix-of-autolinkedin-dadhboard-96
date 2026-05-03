@@ -89,17 +89,7 @@ const Composer = () => {
     },
   });
 
-  // Pickup image sent from Image Studio
-  useEffect(() => {
-    const fromStudio = sessionStorage.getItem("composer-image");
-    if (fromStudio) {
-      setImageUrl(fromStudio);
-      setImageMode("manual");
-      setIncludeImage(true);
-      sessionStorage.removeItem("composer-image");
-      toast({ title: "Image importée depuis Image Studio" });
-    }
-  }, []);
+  // (Image Studio is now a preferences editor — no image is sent over.)
 
   const addAdhoc = () => {
     const v = newSourceValue.trim();
