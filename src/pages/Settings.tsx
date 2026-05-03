@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Loader2, ExternalLink, Key, User, Link as LinkIcon, CheckCircle } from "lucide-react";
+import { Save, Loader2, ExternalLink, Key, User, Link as LinkIcon, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 const settingsFields = [
   {
