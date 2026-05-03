@@ -12,9 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Save, Loader2, ExternalLink, Link as LinkIcon, CheckCircle, XCircle,
-  AlertTriangle, Plus, Trash2, Globe, Hash,
+  Save, Loader2, Link as LinkIcon, CheckCircle, XCircle,
+  AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { POST_MODELS, IMAGE_MODELS } from "@/lib/ai-models";
 
 type UserSettings = {
