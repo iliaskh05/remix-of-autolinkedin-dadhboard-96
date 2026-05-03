@@ -261,7 +261,7 @@ const Settings = () => {
         <div className="space-y-6 scroll-smooth">
 
       {/* LinkedIn App Credentials */}
-      <Card>
+      <Card id="linkedin-app" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <LinkIcon className="h-5 w-5" /> LinkedIn App Credentials
@@ -290,7 +290,7 @@ const Settings = () => {
       </Card>
 
       {/* Connect LinkedIn */}
-      <Card>
+      <Card id="linkedin-account" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             Connect LinkedIn Account
@@ -317,7 +317,7 @@ const Settings = () => {
       </Card>
 
       {/* Content Sources */}
-      <Card>
+      <Card id="sources" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
           <CardTitle>Content Sources</CardTitle>
           <CardDescription>URLs and keywords used as inspiration to generate your posts.</CardDescription>
@@ -359,7 +359,7 @@ const Settings = () => {
       </Card>
 
       {/* AI Models */}
-      <Card>
+      <Card id="ai-models" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
           <CardTitle>AI Models</CardTitle>
           <CardDescription>Choose which AI model to use per feature.</CardDescription>
@@ -444,10 +444,12 @@ const Settings = () => {
         </CardContent>
       </Card>
 
-      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="w-full" size="lg">
+      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="w-full bg-gradient-to-r from-primary to-accent text-white glow-primary lg:hidden" size="lg">
         {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
         Save All Settings
       </Button>
+        </div>
+      </div>
     </div>
   );
 };
