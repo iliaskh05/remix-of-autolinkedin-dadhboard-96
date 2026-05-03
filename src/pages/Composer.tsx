@@ -95,6 +95,8 @@ const Composer = () => {
           currentText: mode === "improve" ? content : undefined,
           imageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
           mode,
+          savedSourceIds: selectedSourceIds,
+          sources: adhocSources.map(({ type, value }) => ({ type, value })),
         },
       });
       if (error) throw error;
