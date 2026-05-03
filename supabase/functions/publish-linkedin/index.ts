@@ -71,7 +71,7 @@ serve(async (req) => {
           requiresReconnect: true,
           error: "Your LinkedIn connection has expired. Reconnect your account in Settings, then try publishing again.",
         }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -171,7 +171,7 @@ serve(async (req) => {
               }
             : { success: false, error: `LinkedIn API error [${linkedinRes.status}]: ${errText}` }
         ),
-        { status: invalidToken ? 401 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: invalidToken ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
