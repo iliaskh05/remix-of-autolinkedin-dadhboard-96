@@ -12,13 +12,14 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt } = await req.json();
+    const { prompt, bottomMarginPercent } = await req.json();
     if (!prompt) {
       return new Response(
         JSON.stringify({ success: false, error: "prompt is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const margin = Math.min(Math.max(Number(bottomMarginPercent) || 14, 8), 25);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
