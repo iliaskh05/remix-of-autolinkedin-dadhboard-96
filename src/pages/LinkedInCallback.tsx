@@ -11,17 +11,32 @@ const LinkedInCallback = () => {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    const notifyParentAndClose = (payload: { success: boolean; error?: string }) => {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "linkedin-oauth-result", ...payload }, window.location.origin);
+        window.close();
+        return true;
+      }
+
+      return false;
+    };
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const error = params.get("error");
 
     if (error) {
+      notifyParentAndClose({
+        success: false,
+        error: params.get("error_description") || "Authorization was denied.",
+      });
       setStatus("error");
       setMessage(params.get("error_description") || "Authorization was denied.");
       return;
     }
 
     if (!code) {
+      notifyParentAndClose({ success: false, error: "No authorization code received." });
       setStatus("error");
       setMessage("No authorization code received.");
       return;
@@ -40,12 +55,20 @@ const LinkedInCallback = () => {
         if (fnError) throw fnError;
         if (!data.success) throw new Error(data.error);
 
+        if (notifyParentAndClose({ success: true })) {
+          return;
+        }
+
         setStatus("success");
         setMessage(`Connected successfully! Person URN: ${data.personUrn}`);
         
         // Redirect to settings after 2 seconds
         setTimeout(() => navigate("/settings"), 2000);
       } catch (err) {
+        notifyParentAndClose({
+          success: false,
+          error: err instanceof Error ? err.message : "Failed to exchange code",
+        });
         setStatus("error");
         setMessage(err instanceof Error ? err.message : "Failed to exchange code");
       }
