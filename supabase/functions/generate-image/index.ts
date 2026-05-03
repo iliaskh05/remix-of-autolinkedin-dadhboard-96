@@ -37,11 +37,19 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image",
+        model: "google/gemini-3.1-flash-image-preview",
         messages: [
           {
             role: "user",
-            content: `Create a professional, clean LinkedIn-style image for a commodity market post. The image should be modern, corporate, and visually appealing. ${prompt}. Use a clean composition with bold colors. No text in the image.`
+            content: `Create a sophisticated, editorial-style image for a LinkedIn commodity market post. Subject: ${prompt}.
+
+Strict art direction:
+- Strict two-color palette: deep matte black (#000000) as dominant background, and vivid lime green (#A8E81C) as the single accent color. White (#FFFFFF) only for minimal typography if needed.
+- Style: refined editorial / financial magazine aesthetic (think Bloomberg Businessweek, Monocle, The Economist covers). Clean, minimalist, human-designed by a senior art director — NOT generic AI art, no glossy 3D renders, no stock-photo look, no gradients soup, no cyberpunk neon.
+- Composition: bold negative space, strong geometric structure, single clear focal point, intentional asymmetry. Flat vector illustration, subtle grain/print texture, or high-contrast minimalist photography are all acceptable.
+- Typography in image: ONLY the wordmark "CommoHedge" placed at the bottom of the image, in a clean modern sans-serif (similar to Inter / Helvetica / Söhne), small, in #A8E81C or white, well-aligned with generous margin. No other text, no captions, no watermarks, no hashtags.
+- Avoid: cartoonish elements, emojis, melting/warped shapes, low-quality typography, lens flares, AI-typical surreal details.
+- Format: square 1:1, sharp, print-quality, professional.`
           }
         ],
         modalities: ["image", "text"]
