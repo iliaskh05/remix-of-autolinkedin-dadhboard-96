@@ -17,9 +17,9 @@ const ALLOWED_MODELS = [
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const { prompt, bottomMarginPercent, model: requestedModel } = await req.json();
+    const { prompt, bottomMarginPercent, model: requestedModel, inputImageUrl } = await req.json();
     if (!prompt) return json(400, { success: false, error: "prompt required" });
-    const margin = Math.min(Math.max(Number(bottomMarginPercent) || 14, 0), 25);
+    const margin = Math.min(Math.max(Number(bottomMarginPercent) || 0, 0), 25);
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const auth = req.headers.get("Authorization");
@@ -41,19 +41,25 @@ serve(async (req) => {
       ? `Reserve a clean empty bottom band of ~${margin}% of the image height free of any text, illustration or chart.`
       : "Use the full canvas.";
 
+    const textInstruction = `Create a professional LinkedIn post image. Subject: ${prompt}.
+
+Style: modern editorial, clean composition, premium feel, strong typography hierarchy if any text is included.
+${marginInstruction}
+Avoid: cartoonish elements, melting shapes, lens flares, surreal AI artefacts, garbled text.`;
+
+    const userContent: unknown = inputImageUrl
+      ? [
+          { type: "text", text: `Edit this image: ${prompt}` },
+          { type: "image_url", image_url: { url: inputImageUrl } },
+        ]
+      : textInstruction;
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{
-          role: "user",
-          content: `Create a professional LinkedIn post image. Subject: ${prompt}.
-
-Style: modern editorial, clean composition, premium feel, strong typography hierarchy if any text is included.
-${marginInstruction}
-Avoid: cartoonish elements, melting shapes, lens flares, surreal AI artefacts, garbled text.`
-        }],
+        messages: [{ role: "user", content: userContent }],
         modalities: ["image", "text"],
       }),
     });
