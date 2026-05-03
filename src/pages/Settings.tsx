@@ -126,6 +126,13 @@ const Settings = () => {
         use_byok: s.use_byok,
         openai_api_key: s.openai_api_key,
         gemini_api_key: s.gemini_api_key,
+        anthropic_api_key: s.anthropic_api_key,
+        mistral_api_key: s.mistral_api_key,
+        groq_api_key: s.groq_api_key,
+        deepseek_api_key: s.deepseek_api_key,
+        xai_api_key: s.xai_api_key,
+        perplexity_api_key: s.perplexity_api_key,
+        openrouter_api_key: s.openrouter_api_key,
         firecrawl_api_key: s.firecrawl_api_key,
         tone_instructions: s.tone_instructions,
       }).eq("user_id", user.id);
