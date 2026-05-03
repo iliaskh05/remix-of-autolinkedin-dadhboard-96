@@ -6,13 +6,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Sparkles, Download } from "lucide-react";
+
+const MODELS = [
+  { value: "google/gemini-3.1-flash-image-preview", label: "Nano Banana 2 — rapide & qualité pro (par défaut)" },
+  { value: "google/gemini-2.5-flash-image", label: "Nano Banana — rapide & économique" },
+  { value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro Image — qualité max (plus lent)" },
+];
 
 const ImageStudio = () => {
   const { toast } = useToast();
   const [prompt, setPrompt] = useState("");
   const [margin, setMargin] = useState(14);
+  const [model, setModel] = useState(MODELS[0].value);
   const [loading, setLoading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
@@ -25,7 +33,7 @@ const ImageStudio = () => {
     setImageUrl(null);
     try {
       const { data, error } = await supabase.functions.invoke("generate-image", {
-        body: { prompt, bottomMarginPercent: margin },
+        body: { prompt, bottomMarginPercent: margin, model },
       });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || "Échec de la génération");
@@ -83,6 +91,22 @@ const ImageStudio = () => {
               <p className="text-xs text-muted-foreground">
                 Réserve une bande vide en bas pour garantir lisibilité du wordmark « CommoHedge ».
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Modèle Lovable AI</Label>
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODELS.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <Button onClick={generate} disabled={loading} className="w-full" size="lg">
