@@ -12,13 +12,14 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt } = await req.json();
+    const { prompt, bottomMarginPercent } = await req.json();
     if (!prompt) {
       return new Response(
         JSON.stringify({ success: false, error: "prompt is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const margin = Math.min(Math.max(Number(bottomMarginPercent) || 14, 8), 25);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -41,15 +42,15 @@ serve(async (req) => {
         messages: [
           {
             role: "user",
-            content: `Create a sophisticated, editorial-style image for a LinkedIn commodity market post. Subject: ${prompt}.
+            content: `Create a sophisticated, editorial-style SQUARE 1:1 image for a LinkedIn commodity market post. Subject: ${prompt}.
 
 Strict art direction:
-- Strict two-color palette: deep matte black (#000000) as dominant background, and vivid lime green (#A8E81C) as the single accent color. White (#FFFFFF) only for minimal typography if needed.
-- Style: refined editorial / financial magazine aesthetic (think Bloomberg Businessweek, Monocle, The Economist covers). Clean, minimalist, human-designed by a senior art director — NOT generic AI art, no glossy 3D renders, no stock-photo look, no gradients soup, no cyberpunk neon.
-- Composition: bold negative space, strong geometric structure, single clear focal point, intentional asymmetry. Flat vector illustration, subtle grain/print texture, or high-contrast minimalist photography are all acceptable.
-- Typography in image: ONLY the wordmark "CommoHedge" placed at the bottom of the image, in a clean modern sans-serif (similar to Inter / Helvetica / Söhne), small, in #A8E81C or white, well-aligned with generous margin. No other text, no captions, no watermarks, no hashtags.
-- Avoid: cartoonish elements, emojis, melting/warped shapes, low-quality typography, lens flares, AI-typical surreal details.
-- Format: square 1:1, sharp, print-quality, professional.`
+- Format: STRICT square 1:1 aspect ratio. Reserve a clean empty band of approximately ${margin}% of the image height at the BOTTOM, free of any illustration, graphic or noise — this band is exclusively for the wordmark.
+- Wordmark: place ONLY the text "CommoHedge" perfectly horizontally centered inside that bottom band, with equal left/right margins. Use a clean modern sans-serif (Inter / Helvetica / Söhne style), medium weight, small-to-medium size, fully legible, in #A8E81C on black (or white if background in that band is black). No tagline, no other text, no watermark, no hashtags. The wordmark must NEVER be cropped, tilted, distorted or overlapped by any visual element.
+- Strict two-color palette: deep matte black (#000000) dominant, vivid lime green (#A8E81C) as the single accent. White only if strictly necessary.
+- Style: refined editorial / financial magazine aesthetic (Bloomberg Businessweek, Monocle, The Economist). Human senior art director feel — NOT generic AI art, no glossy 3D, no stock photo, no neon cyberpunk, no gradient soup.
+- Composition: bold negative space, strong geometric structure, single clear focal point in the upper ~${100 - margin}% of the canvas.
+- Avoid: cartoonish elements, emojis, melting shapes, lens flares, surreal AI artefacts, low-quality typography.`
           }
         ],
         modalities: ["image", "text"]
