@@ -29,9 +29,36 @@ type UserSettings = {
   use_byok: boolean;
   openai_api_key: string | null;
   gemini_api_key: string | null;
+  anthropic_api_key: string | null;
+  mistral_api_key: string | null;
+  groq_api_key: string | null;
+  deepseek_api_key: string | null;
+  xai_api_key: string | null;
+  perplexity_api_key: string | null;
+  openrouter_api_key: string | null;
   firecrawl_api_key: string | null;
   tone_instructions: string | null;
 };
+
+type ByokProvider = {
+  field: keyof UserSettings;
+  label: string;
+  placeholder: string;
+  url: string;
+  hint: string;
+};
+
+const TEXT_PROVIDERS: ByokProvider[] = [
+  { field: "openai_api_key", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys", hint: "GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5.2." },
+  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Tous Gemini texte + image (2.5/3.x, Nano Banana 1 & 2, Gemini 3 Pro Image)." },
+  { field: "anthropic_api_key", label: "Anthropic Claude", placeholder: "sk-ant-...", url: "https://console.anthropic.com/settings/keys", hint: "Claude Opus, Sonnet, Haiku." },
+  { field: "mistral_api_key", label: "Mistral AI", placeholder: "...", url: "https://console.mistral.ai/api-keys", hint: "Mistral Large, Medium, Small, Codestral." },
+  { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Llama 3.x, Mixtral — inférence ultra-rapide." },
+  { field: "deepseek_api_key", label: "DeepSeek", placeholder: "sk-...", url: "https://platform.deepseek.com/api_keys", hint: "DeepSeek V3, R1 reasoning." },
+  { field: "xai_api_key", label: "xAI Grok", placeholder: "xai-...", url: "https://console.x.ai/", hint: "Grok 2, Grok 4." },
+  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Sonar (search-augmented LLM)." },
+  { field: "openrouter_api_key", label: "OpenRouter", placeholder: "sk-or-...", url: "https://openrouter.ai/keys", hint: "Routeur unifié vers 200+ modèles (Llama, Qwen, Cohere…)." },
+];
 
 const Settings = () => {
   const { user } = useAuth();
