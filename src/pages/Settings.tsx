@@ -29,9 +29,36 @@ type UserSettings = {
   use_byok: boolean;
   openai_api_key: string | null;
   gemini_api_key: string | null;
+  anthropic_api_key: string | null;
+  mistral_api_key: string | null;
+  groq_api_key: string | null;
+  deepseek_api_key: string | null;
+  xai_api_key: string | null;
+  perplexity_api_key: string | null;
+  openrouter_api_key: string | null;
   firecrawl_api_key: string | null;
   tone_instructions: string | null;
 };
+
+type ByokProvider = {
+  field: keyof UserSettings;
+  label: string;
+  placeholder: string;
+  url: string;
+  hint: string;
+};
+
+const TEXT_PROVIDERS: ByokProvider[] = [
+  { field: "openai_api_key", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys", hint: "GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5.2." },
+  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Tous Gemini texte + image (2.5/3.x, Nano Banana 1 & 2, Gemini 3 Pro Image)." },
+  { field: "anthropic_api_key", label: "Anthropic Claude", placeholder: "sk-ant-...", url: "https://console.anthropic.com/settings/keys", hint: "Claude Opus, Sonnet, Haiku." },
+  { field: "mistral_api_key", label: "Mistral AI", placeholder: "...", url: "https://console.mistral.ai/api-keys", hint: "Mistral Large, Medium, Small, Codestral." },
+  { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Llama 3.x, Mixtral — inférence ultra-rapide." },
+  { field: "deepseek_api_key", label: "DeepSeek", placeholder: "sk-...", url: "https://platform.deepseek.com/api_keys", hint: "DeepSeek V3, R1 reasoning." },
+  { field: "xai_api_key", label: "xAI Grok", placeholder: "xai-...", url: "https://console.x.ai/", hint: "Grok 2, Grok 4." },
+  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Sonar (search-augmented LLM)." },
+  { field: "openrouter_api_key", label: "OpenRouter", placeholder: "sk-or-...", url: "https://openrouter.ai/keys", hint: "Routeur unifié vers 200+ modèles (Llama, Qwen, Cohere…)." },
+];
 
 const Settings = () => {
   const { user } = useAuth();
@@ -99,6 +126,13 @@ const Settings = () => {
         use_byok: s.use_byok,
         openai_api_key: s.openai_api_key,
         gemini_api_key: s.gemini_api_key,
+        anthropic_api_key: s.anthropic_api_key,
+        mistral_api_key: s.mistral_api_key,
+        groq_api_key: s.groq_api_key,
+        deepseek_api_key: s.deepseek_api_key,
+        xai_api_key: s.xai_api_key,
+        perplexity_api_key: s.perplexity_api_key,
+        openrouter_api_key: s.openrouter_api_key,
         firecrawl_api_key: s.firecrawl_api_key,
         tone_instructions: s.tone_instructions,
       }).eq("user_id", user.id);
@@ -327,24 +361,24 @@ const Settings = () => {
           {s.use_byok && (
             <div className="space-y-4 pl-4 border-l-2 border-primary/30">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Génération de texte</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Modèles IA (texte & image)</p>
                 <div className="space-y-3">
-                  <div className="space-y-1">
-                    <Label>OpenAI API Key</Label>
-                    <Input type="password" autoComplete="off" value={s.openai_api_key || ""} onChange={(e) => setS({ ...s, openai_api_key: e.target.value })} placeholder="sk-..." />
-                    <p className="text-[11px] text-muted-foreground">
-                      Couvre tous les modèles GPT-5 (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.2). Récupère ta clé sur{" "}
-                      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">platform.openai.com</a>.
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Google Gemini API Key</Label>
-                    <Input type="password" autoComplete="off" value={s.gemini_api_key || ""} onChange={(e) => setS({ ...s, gemini_api_key: e.target.value })} placeholder="AIza..." />
-                    <p className="text-[11px] text-muted-foreground">
-                      Couvre tous les modèles Gemini texte ET image (2.5 Pro/Flash/Lite, 3 Flash/Pro Preview, Nano Banana 1 & 2, Gemini 3 Pro Image). Récupère ta clé sur{" "}
-                      <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline">aistudio.google.com</a>.
-                    </p>
-                  </div>
+                  {TEXT_PROVIDERS.map((p) => (
+                    <div key={p.field as string} className="space-y-1">
+                      <Label>{p.label} API Key</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={(s[p.field] as string | null) || ""}
+                        onChange={(e) => setS({ ...s, [p.field]: e.target.value } as UserSettings)}
+                        placeholder={p.placeholder}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        {p.hint}{" "}
+                        <a href={p.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Récupérer la clé →</a>
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -354,14 +388,14 @@ const Settings = () => {
                   <Label>Firecrawl API Key</Label>
                   <Input type="password" autoComplete="off" value={s.firecrawl_api_key || ""} onChange={(e) => setS({ ...s, firecrawl_api_key: e.target.value })} placeholder="fc-..." />
                   <p className="text-[11px] text-muted-foreground">
-                    Utilisée pour scraper les URLs et faire les recherches web (mots-clés) dans tes Content Sources. Récupère ta clé sur{" "}
-                    <a href="https://www.firecrawl.dev/app/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">firecrawl.dev</a>.
+                    Utilisée pour scraper les URLs et faire les recherches web (mots-clés) dans tes Content Sources.{" "}
+                    <a href="https://www.firecrawl.dev/app/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">Récupérer la clé →</a>
                   </p>
                 </div>
               </div>
 
               <div className="rounded-md bg-muted/50 p-3 text-[11px] text-muted-foreground">
-                💡 Tu peux ne renseigner que certaines clés. Pour celles qui sont vides, l'app retombe automatiquement sur les services partagés Lovable.
+                💡 Tu peux ne renseigner que certaines clés. Pour celles qui sont vides, l'app retombe automatiquement sur Lovable AI / connecteurs partagés.
               </div>
             </div>
           )}
