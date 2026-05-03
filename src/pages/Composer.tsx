@@ -51,10 +51,21 @@ const Composer = () => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [includeImage, setIncludeImage] = useState(true);
 
-  // Schedule
+  // Schedule (one-shot)
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
   const [scheduleTime, setScheduleTime] = useState("09:00");
+
+  // Automation (recurring)
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [autoName, setAutoName] = useState("");
+  const [autoDays, setAutoDays] = useState<number[]>([1, 3, 5]);
+  const [autoHour, setAutoHour] = useState(9);
+  const [autoMinute, setAutoMinute] = useState(0);
+  const [autoTz, setAutoTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Paris");
+
+  // Eligibility for recurring schedule: must use AI text + (no image OR AI image). Manual text/image = static, can't re-run.
+  const canAutomate = textMode === "ai" && textPrompt.trim().length > 0 && (!includeImage || imageMode === "ai");
 
   // Sources (per-post)
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
