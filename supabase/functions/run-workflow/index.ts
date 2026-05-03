@@ -62,7 +62,7 @@ serve(async (req) => {
           Authorization: `Bearer ${anonKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: postData.imagePrompt }),
+        body: JSON.stringify({ prompt: postData.imagePrompt, bottomMarginPercent: 14 }),
       });
       const imgData = await imgRes.json();
       if (imgData.success) {
