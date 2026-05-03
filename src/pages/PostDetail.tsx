@@ -72,7 +72,7 @@ const PostDetail = () => {
       <div className="p-8 text-center">
         <p className="text-muted-foreground">Post not found</p>
         <Button variant="ghost" asChild className="mt-4">
-          <Link to="/"><ArrowLeft className="h-4 w-4 mr-2" /> Back to Dashboard</Link>
+          <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Back to Dashboard</Link>
         </Button>
       </div>
     );
@@ -81,7 +81,7 @@ const PostDetail = () => {
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <Button variant="ghost" asChild className="mb-6">
-        <Link to="/"><ArrowLeft className="h-4 w-4 mr-2" /> Back</Link>
+        <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Back</Link>
       </Button>
 
       <div className="grid md:grid-cols-2 gap-6">
