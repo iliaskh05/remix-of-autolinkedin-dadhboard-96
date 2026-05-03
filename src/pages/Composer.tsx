@@ -140,11 +140,18 @@ const Composer = () => {
   const generateImage = useMutation({
     mutationFn: async () => {
       setBusy("image");
+      const prefs = loadPrefs();
       const { data, error } = await supabase.functions.invoke("generate-image", {
         body: {
           prompt: imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
           inputImageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
-          bottomMarginPercent: 0,
+          aspectRatio: prefs.aspectRatio,
+          style: prefs.style,
+          mood: prefs.mood,
+          colors: prefs.colors,
+          bottomMarginPercent: prefs.bottomMarginPercent,
+          textOverlay: prefs.textOverlay,
+          wordmark: prefs.wordmark,
         },
       });
       if (error) throw error;
