@@ -14,10 +14,73 @@ const ALLOWED_MODELS = [
   "google/gemini-3-pro-image-preview",
 ];
 
+const POSITION_LABELS: Record<string, string> = {
+  "top-left": "top-left corner",
+  "top-center": "top center",
+  "top-right": "top-right corner",
+  "center-left": "middle-left",
+  "center": "exact center",
+  "center-right": "middle-right",
+  "bottom-left": "bottom-left corner",
+  "bottom-center": "bottom center",
+  "bottom-right": "bottom-right corner",
+};
+
+function buildPrompt(opts: {
+  prompt: string;
+  style?: string;
+  mood?: string;
+  colors?: string[];
+  aspectRatio?: string;
+  textOverlay?: { text: string; position: string; weight?: string; color?: string };
+  wordmark?: { text: string; position: string };
+  margin?: number;
+}): string {
+  const parts: string[] = [];
+  parts.push(`Create a professional LinkedIn post image. Subject: ${opts.prompt}.`);
+  if (opts.aspectRatio) parts.push(`Aspect ratio: ${opts.aspectRatio}.`);
+  if (opts.style) parts.push(`Visual style: ${opts.style}.`);
+  if (opts.mood) parts.push(`Mood and atmosphere: ${opts.mood}.`);
+  if (opts.colors?.length) {
+    parts.push(`Strict color palette to use as dominant colors: ${opts.colors.join(", ")}. Do not introduce other strong hues.`);
+  }
+  if (opts.textOverlay?.text) {
+    const pos = POSITION_LABELS[opts.textOverlay.position] || "center";
+    const weight = opts.textOverlay.weight || "bold";
+    const color = opts.textOverlay.color ? ` in ${opts.textOverlay.color}` : "";
+    parts.push(
+      `Render this exact text on the image, perfectly legible, no typos, no extra words: "${opts.textOverlay.text}". ` +
+      `Place it at the ${pos} of the image. Use a ${weight} sans-serif typography${color}, with clean kerning and high contrast against the background.`
+    );
+  }
+  if (opts.wordmark?.text) {
+    const pos = POSITION_LABELS[opts.wordmark.position] || "bottom-center";
+    parts.push(`Add a small wordmark "${opts.wordmark.text}" at the ${pos}, discreet but readable.`);
+  }
+  if (opts.margin && opts.margin > 0) {
+    parts.push(`Keep a clean empty band of approximately ${opts.margin}% of the image height free of any subject element at the bottom.`);
+  }
+  parts.push(`Premium editorial quality, sharp composition, balanced negative space.`);
+  parts.push(`Strictly avoid: cartoonish artefacts, melting shapes, lens flares, garbled or distorted text, watermarks.`);
+  return parts.join(" ");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const { prompt, bottomMarginPercent, model: requestedModel, inputImageUrl } = await req.json();
+    const body = await req.json();
+    const {
+      prompt,
+      bottomMarginPercent,
+      model: requestedModel,
+      inputImageUrl,
+      style,
+      mood,
+      colors,
+      aspectRatio,
+      textOverlay,
+      wordmark,
+    } = body;
     if (!prompt) return json(400, { success: false, error: "prompt required" });
     const margin = Math.min(Math.max(Number(bottomMarginPercent) || 0, 0), 25);
 
@@ -37,22 +100,14 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) return json(500, { success: false, error: "LOVABLE_API_KEY not configured" });
 
-    const marginInstruction = margin > 0
-      ? `Reserve a clean empty bottom band of ~${margin}% of the image height free of any text, illustration or chart.`
-      : "Use the full canvas.";
-
-    const textInstruction = `Create a professional LinkedIn post image. Subject: ${prompt}.
-
-Style: modern editorial, clean composition, premium feel, strong typography hierarchy if any text is included.
-${marginInstruction}
-Avoid: cartoonish elements, melting shapes, lens flares, surreal AI artefacts, garbled text.`;
+    const fullPrompt = buildPrompt({ prompt, style, mood, colors, aspectRatio, textOverlay, wordmark, margin });
 
     const userContent: unknown = inputImageUrl
       ? [
-          { type: "text", text: `Edit this image: ${prompt}` },
+          { type: "text", text: `Edit this image following these instructions: ${fullPrompt}` },
           { type: "image_url", image_url: { url: inputImageUrl } },
         ]
-      : textInstruction;
+      : fullPrompt;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",

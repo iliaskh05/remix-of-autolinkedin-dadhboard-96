@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -87,6 +87,18 @@ const Composer = () => {
       return data;
     },
   });
+
+  // Pickup image sent from Image Studio
+  useEffect(() => {
+    const fromStudio = sessionStorage.getItem("composer-image");
+    if (fromStudio) {
+      setImageUrl(fromStudio);
+      setImageMode("manual");
+      setIncludeImage(true);
+      sessionStorage.removeItem("composer-image");
+      toast({ title: "Image importée depuis Image Studio" });
+    }
+  }, []);
 
   const addAdhoc = () => {
     const v = newSourceValue.trim();
