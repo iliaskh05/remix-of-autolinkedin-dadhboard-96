@@ -212,12 +212,53 @@ const Settings = () => {
   const hasLinkedIn = !!(s.linkedin_access_token && s.linkedin_person_urn);
   const isConnected = hasLinkedIn && !isExpired;
 
+  const sections = [
+    { id: "linkedin-app", label: "LinkedIn app", icon: KeyRound },
+    { id: "linkedin-account", label: "LinkedIn account", icon: Linkedin },
+    { id: "sources", label: "Content sources", icon: BookMarked },
+    { id: "ai-models", label: "AI & BYOK", icon: Sparkles },
+  ];
+
   return (
-    <div className="p-8 max-w-3xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground mt-1">Configure your LinkedIn page, content sources, and AI models.</p>
+    <div className="p-6 lg:p-10 max-w-7xl mx-auto animate-fade-in-up">
+      {/* HEADER */}
+      <div className="mb-8">
+        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Settings</div>
+        <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight">
+          Configure ton <span className="text-gradient">workspace</span>
+        </h1>
+        <p className="text-muted-foreground mt-2">LinkedIn, sources d'inspiration, modèles IA et clés API — tout au même endroit.</p>
       </div>
+
+      <div className="grid lg:grid-cols-[220px_1fr] gap-8">
+        {/* LEFT: section nav */}
+        <aside className="hidden lg:block">
+          <nav className="sticky top-6 space-y-1">
+            {sections.map((sec) => (
+              <a
+                key={sec.id}
+                href={`#${sec.id}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition"
+              >
+                <sec.icon className="h-4 w-4" />
+                {sec.label}
+              </a>
+            ))}
+            <div className="pt-3 mt-3 border-t border-border/40">
+              <Button
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="w-full bg-gradient-to-r from-primary to-accent text-white"
+              >
+                {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save
+              </Button>
+            </div>
+          </nav>
+        </aside>
+
+        {/* RIGHT: sections */}
+        <div className="space-y-6 scroll-smooth">
 
       {/* LinkedIn App Credentials */}
       <Card>
