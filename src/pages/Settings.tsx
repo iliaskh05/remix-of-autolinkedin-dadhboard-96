@@ -112,7 +112,7 @@ const Settings = () => {
       const popup = window.open(
         data.authUrl,
         "linkedin-oauth",
-        "popup=yes,width=720,height=820,noopener,noreferrer"
+        "popup=yes,width=720,height=820"
       );
 
       if (!popup) {
