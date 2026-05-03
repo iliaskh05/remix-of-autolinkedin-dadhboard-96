@@ -88,7 +88,7 @@ export default function Schedules() {
     queryFn: async () => {
       const { data, error } = await supabase.from("schedules").select("*").order("created_at", { ascending: false });
       if (error) throw error;
-      return data as Schedule[];
+      return (data as unknown) as Schedule[];
     },
   });
 
