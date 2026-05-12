@@ -44,6 +44,17 @@ const LinkedInCallback = () => {
 
     const exchangeCode = async () => {
       try {
+        // Wait for the session to be restored from localStorage before invoking
+        // the edge function (popup window may not have it ready instantly).
+        let { data: sessionData } = await supabase.auth.getSession();
+        for (let i = 0; i < 20 && !sessionData.session; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          ({ data: sessionData } = await supabase.auth.getSession());
+        }
+        if (!sessionData.session) {
+          throw new Error("You are not signed in. Please log in and reconnect LinkedIn from Settings.");
+        }
+
         const { data, error: fnError } = await supabase.functions.invoke("linkedin-oauth", {
           body: {
             action: "exchange_code",
