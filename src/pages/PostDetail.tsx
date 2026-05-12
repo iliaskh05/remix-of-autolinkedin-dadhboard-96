@@ -142,7 +142,7 @@ const PostDetail = () => {
             </Card>
           )}
 
-          {post.status === "ready" && (
+          {["draft", "ready", "failed"].includes(post.status) && (
             <Button
               onClick={() => publishPost.mutate()}
               disabled={publishPost.isPending}
@@ -154,7 +154,7 @@ const PostDetail = () => {
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              Publish to LinkedIn
+              {post.status === "failed" ? "Retry publish to LinkedIn" : "Publish to LinkedIn"}
             </Button>
           )}
         </div>
