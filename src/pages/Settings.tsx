@@ -213,9 +213,23 @@ const Settings = () => {
       toast({ title: "Identifiants requis", description: "Enregistre d'abord ton Client ID & Secret.", variant: "destructive" });
       return;
     }
+
+    // Vérifier explicitement la session Supabase avant d'appeler l'Edge Function
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({
+        title: "Connexion requise",
+        description: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn.",
+        variant: "destructive",
+      });
+      navigate("/auth", { state: { linkedinAuthRequired: true, message: "Connecte-toi à ton compte avant de lier LinkedIn." } });
+      return;
+    }
+
     setIsConnecting(true);
     try {
       const { data, error } = await supabase.functions.invoke("linkedin-oauth", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
         body: { action: "get_auth_url", redirectUri: redirectUrl },
       });
       if (error) {
