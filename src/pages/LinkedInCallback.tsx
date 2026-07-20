@@ -56,6 +56,7 @@ const LinkedInCallback = () => {
         }
 
         const { data, error: fnError } = await supabase.functions.invoke("linkedin-oauth", {
+          headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
           body: {
             action: "exchange_code",
             code,
