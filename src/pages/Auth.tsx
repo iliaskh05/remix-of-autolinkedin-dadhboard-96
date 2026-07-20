@@ -14,10 +14,13 @@ import { Loader2, Zap, AlertCircle } from "lucide-react";
 const Auth = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const linkedinRedirect = location.state as { linkedinAuthRequired?: boolean; message?: string } | null;
 
   useEffect(() => {
     if (!loading && user) navigate("/dashboard", { replace: true });
