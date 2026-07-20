@@ -53,7 +53,7 @@ serve(async (req) => {
       const clientSecret = settings?.linkedin_client_secret || Deno.env.get("LINKEDIN_CLIENT_SECRET");
       if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
 
-      if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
+
 
       const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
         method: "POST",
