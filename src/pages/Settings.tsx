@@ -65,6 +65,7 @@ const LS_KEY = (uid: string) => `linkedin_app_draft_${uid}`;
 
 const Settings = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [s, setS] = useState<UserSettings | null>(null);
