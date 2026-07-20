@@ -32,8 +32,9 @@ serve(async (req) => {
 
       const { data: settings } = await supabase
         .from("user_settings").select("linkedin_client_id").eq("user_id", userId).maybeSingle();
-      const clientId = settings?.linkedin_client_id;
+      const clientId = settings?.linkedin_client_id || Deno.env.get("LINKEDIN_CLIENT_ID");
       if (!clientId) return json(400, { success: false, error: "Set your LinkedIn Client ID in Settings first." });
+
 
       const scopes = "openid profile email w_member_social w_organization_social r_organization_social rw_organization_admin";
       // state encodes the user id so the callback can find which user is connecting
