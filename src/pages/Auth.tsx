@@ -67,6 +67,12 @@ const Auth = () => {
           <CardDescription>Generate & publish AI-powered posts to your LinkedIn page.</CardDescription>
         </CardHeader>
         <CardContent>
+          {linkedinRedirect?.linkedinAuthRequired && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{linkedinRedirect.message || "Connecte-toi à ton compte CommoHedge avant de lier LinkedIn."}</span>
+            </div>
+          )}
           <Button variant="outline" className="w-full mb-4" onClick={handleGoogle} disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue with Google"}
           </Button>
