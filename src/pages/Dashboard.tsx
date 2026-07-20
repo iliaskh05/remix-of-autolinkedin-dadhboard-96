@@ -44,6 +44,23 @@ const Dashboard = () => {
     },
   });
 
+  const { data: settings } = useQuery({
+    queryKey: ["user_settings_status"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_settings")
+        .select("linkedin_access_token, linkedin_person_urn, linkedin_token_expires_at")
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  const linkedInConnected = !!(
+    settings?.linkedin_access_token &&
+    settings?.linkedin_person_urn &&
+    (!settings?.linkedin_token_expires_at || new Date(settings.linkedin_token_expires_at).getTime() > Date.now())
+  );
+
   const stats = useMemo(() => {
     const total = posts?.length || 0;
     const published = posts?.filter((p) => p.status === "published").length || 0;
