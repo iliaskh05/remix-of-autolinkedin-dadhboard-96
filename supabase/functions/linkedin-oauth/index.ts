@@ -28,7 +28,14 @@ serve(async (req) => {
 
     if (action === "get_auth_url") {
       const userId = await getUserId(req, supabase);
-      if (!userId) return json(401, { success: false, error: "Unauthorized" });
+      if (!userId) {
+        return json(401, {
+          success: false,
+          error: "NOT_AUTHENTICATED",
+          message: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn. Redirection vers la page de connexion...",
+          redirectTo: "/auth",
+        });
+      }
 
       const { data: settings } = await supabase
         .from("user_settings").select("linkedin_client_id, linkedin_organization_id").eq("user_id", userId).maybeSingle();
@@ -48,7 +55,14 @@ serve(async (req) => {
 
     if (action === "exchange_code") {
       const userId = await getUserId(req, supabase);
-      if (!userId) return json(401, { success: false, error: "Unauthorized" });
+      if (!userId) {
+        return json(401, {
+          success: false,
+          error: "NOT_AUTHENTICATED",
+          message: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn. Redirection vers la page de connexion...",
+          redirectTo: "/auth",
+        });
+      }
 
       const { data: settings } = await supabase
         .from("user_settings").select("linkedin_client_id, linkedin_client_secret").eq("user_id", userId).maybeSingle();

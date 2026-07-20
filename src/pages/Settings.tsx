@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -64,6 +65,7 @@ const LS_KEY = (uid: string) => `linkedin_app_draft_${uid}`;
 
 const Settings = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [s, setS] = useState<UserSettings | null>(null);
@@ -216,7 +218,24 @@ const Settings = () => {
       const { data, error } = await supabase.functions.invoke("linkedin-oauth", {
         body: { action: "get_auth_url", redirectUri: redirectUrl },
       });
-      if (error) throw error;
+      if (error) {
+        // Edge Function a renvoyé une erreur HTTP (ex: 401 non authentifié)
+        let body: { error?: string; message?: string; redirectTo?: string } | null = null;
+        if (error && typeof error === "object" && "context" in error && error.context && typeof error.context.json === "function") {
+          try { body = await error.context.json(); } catch { /* ignore */ }
+        }
+        if (body?.error === "NOT_AUTHENTICATED") {
+          toast({
+            title: "Connexion requise",
+            description: body.message || "Connecte-toi à ton compte CommoHedge avant de lier LinkedIn.",
+            variant: "destructive",
+          });
+          navigate("/auth", { state: { linkedinAuthRequired: true, message: body.message } });
+          setIsConnecting(false);
+          return;
+        }
+        throw error;
+      }
       if (!data.success) throw new Error(data.error);
       const popup = window.open(data.authUrl, "linkedin-oauth", "popup=yes,width=720,height=820");
       if (!popup) {

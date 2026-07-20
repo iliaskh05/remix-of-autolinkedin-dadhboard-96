@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,15 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap } from "lucide-react";
+import { Loader2, Zap, AlertCircle } from "lucide-react";
 
 const Auth = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const linkedinRedirect = location.state as { linkedinAuthRequired?: boolean; message?: string } | null;
 
   useEffect(() => {
     if (!loading && user) navigate("/dashboard", { replace: true });
@@ -64,6 +67,12 @@ const Auth = () => {
           <CardDescription>Generate & publish AI-powered posts to your LinkedIn page.</CardDescription>
         </CardHeader>
         <CardContent>
+          {linkedinRedirect?.linkedinAuthRequired && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{linkedinRedirect.message || "Connecte-toi à ton compte CommoHedge avant de lier LinkedIn."}</span>
+            </div>
+          )}
           <Button variant="outline" className="w-full mb-4" onClick={handleGoogle} disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue with Google"}
           </Button>
