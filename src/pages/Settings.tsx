@@ -13,9 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   Save, Loader2, Link as LinkIcon, CheckCircle, XCircle,
-  AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound,
+  AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound, Copy, Check,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { POST_MODELS, IMAGE_MODELS } from "@/lib/ai-models";
 
 type UserSettings = {
@@ -57,9 +56,11 @@ const TEXT_PROVIDERS: ByokProvider[] = [
   { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Llama 3.x, Mixtral — inférence ultra-rapide." },
   { field: "deepseek_api_key", label: "DeepSeek", placeholder: "sk-...", url: "https://platform.deepseek.com/api_keys", hint: "DeepSeek V3, R1 reasoning." },
   { field: "xai_api_key", label: "xAI Grok", placeholder: "xai-...", url: "https://console.x.ai/", hint: "Grok 2, Grok 4." },
-  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Sonar (search-augmented LLM)." },
+  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Sonar (LLM avec recherche intégrée)." },
   { field: "openrouter_api_key", label: "OpenRouter", placeholder: "sk-or-...", url: "https://openrouter.ai/keys", hint: "Routeur unifié vers 200+ modèles (Llama, Qwen, Cohere…)." },
 ];
+
+const LS_KEY = (uid: string) => `linkedin_app_draft_${uid}`;
 
 const Settings = () => {
   const { user } = useAuth();
@@ -67,9 +68,11 @@ const Settings = () => {
   const qc = useQueryClient();
   const [s, setS] = useState<UserSettings | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [newSource, setNewSource] = useState<{ type: "url" | "keyword"; value: string; label: string }>({
     type: "url", value: "", label: "",
   });
+  const redirectUrl = `${window.location.origin}/linkedin/callback`;
 
   // Listen for OAuth popup result
   useEffect(() => {
@@ -79,9 +82,9 @@ const Settings = () => {
       setIsConnecting(false);
       if (event.data.success) {
         qc.invalidateQueries({ queryKey: ["user_settings"] });
-        toast({ title: "LinkedIn connected" });
+        toast({ title: "LinkedIn connecté" });
       } else {
-        toast({ title: "Connection failed", description: event.data.error, variant: "destructive" });
+        toast({ title: "Échec de la connexion", description: event.data.error, variant: "destructive" });
       }
     };
     window.addEventListener("message", handler);
@@ -94,16 +97,40 @@ const Settings = () => {
     queryFn: async () => {
       const { data, error } = await supabase.from("user_settings").select("*").eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
-      // Auto-create row if missing (e.g. user signed up before trigger existed)
-      if (!data) {
+      let base = data as UserSettings | null;
+      if (!base) {
         const { data: created } = await supabase.from("user_settings").insert({ user_id: user!.id }).select().single();
-        setS(created as UserSettings);
-        return created;
+        base = created as UserSettings;
       }
-      setS(data as UserSettings);
-      return data;
+      // Merge with localStorage draft (draft wins for unsaved LinkedIn app fields)
+      try {
+        const raw = localStorage.getItem(LS_KEY(user!.id));
+        if (raw) {
+          const draft = JSON.parse(raw) as Partial<UserSettings>;
+          base = {
+            ...base,
+            linkedin_client_id: draft.linkedin_client_id ?? base.linkedin_client_id,
+            linkedin_client_secret: draft.linkedin_client_secret ?? base.linkedin_client_secret,
+            linkedin_organization_id: draft.linkedin_organization_id ?? base.linkedin_organization_id,
+          };
+        }
+      } catch { /* ignore */ }
+      setS(base);
+      return base;
     },
   });
+
+  // Persist LinkedIn app fields to localStorage on change
+  useEffect(() => {
+    if (!s || !user) return;
+    try {
+      localStorage.setItem(LS_KEY(user.id), JSON.stringify({
+        linkedin_client_id: s.linkedin_client_id,
+        linkedin_client_secret: s.linkedin_client_secret,
+        linkedin_organization_id: s.linkedin_organization_id,
+      }));
+    } catch { /* ignore */ }
+  }, [s?.linkedin_client_id, s?.linkedin_client_secret, s?.linkedin_organization_id, user, s]);
 
   const { data: sources } = useQuery({
     queryKey: ["content_sources", user?.id],
@@ -140,10 +167,10 @@ const Settings = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "Settings saved" });
+      toast({ title: "Paramètres enregistrés" });
       qc.invalidateQueries({ queryKey: ["user_settings"] });
     },
-    onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
   const addSource = useMutation({
@@ -181,25 +208,35 @@ const Settings = () => {
 
   const handleConnectLinkedIn = async () => {
     if (!s?.linkedin_client_id || !s?.linkedin_client_secret) {
-      toast({ title: "LinkedIn app credentials required", description: "Save your Client ID & Secret first.", variant: "destructive" });
+      toast({ title: "Identifiants requis", description: "Enregistre d'abord ton Client ID & Secret.", variant: "destructive" });
       return;
     }
     setIsConnecting(true);
     try {
-      const redirectUri = `${window.location.origin}/linkedin/callback`;
       const { data, error } = await supabase.functions.invoke("linkedin-oauth", {
-        body: { action: "get_auth_url", redirectUri },
+        body: { action: "get_auth_url", redirectUri: redirectUrl },
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error);
       const popup = window.open(data.authUrl, "linkedin-oauth", "popup=yes,width=720,height=820");
       if (!popup) {
         setIsConnecting(false);
-        throw new Error("Popup blocked. Allow popups and try again.");
+        throw new Error("Popup bloquée. Autorise les popups et réessaie.");
       }
     } catch (err) {
-      toast({ title: "Error", description: err instanceof Error ? err.message : "Failed", variant: "destructive" });
+      toast({ title: "Erreur", description: err instanceof Error ? err.message : "Échec", variant: "destructive" });
       setIsConnecting(false);
+    }
+  };
+
+  const copyRedirect = async () => {
+    try {
+      await navigator.clipboard.writeText(redirectUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast({ title: "Copié dans le presse-papiers" });
+    } catch {
+      toast({ title: "Impossible de copier", variant: "destructive" });
     }
   };
 
@@ -211,19 +248,20 @@ const Settings = () => {
   const isExpired = expiresAt ? expiresAt.getTime() < Date.now() : false;
   const hasLinkedIn = !!(s.linkedin_access_token && s.linkedin_person_urn);
   const isConnected = hasLinkedIn && !isExpired;
+  const hasAppCreds = !!(s.linkedin_client_id && s.linkedin_client_secret);
 
   const sections = [
-    { id: "linkedin-app", label: "LinkedIn app", icon: KeyRound },
-    { id: "linkedin-account", label: "LinkedIn account", icon: Linkedin },
-    { id: "sources", label: "Content sources", icon: BookMarked },
-    { id: "ai-models", label: "AI & BYOK", icon: Sparkles },
+    { id: "linkedin-app", label: "App LinkedIn", icon: KeyRound },
+    { id: "linkedin-account", label: "Compte LinkedIn", icon: Linkedin },
+    { id: "sources", label: "Sources de contenu", icon: BookMarked },
+    { id: "ai-models", label: "IA & BYOK", icon: Sparkles },
   ];
 
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto animate-fade-in-up">
       {/* HEADER */}
       <div className="mb-8">
-        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Settings</div>
+        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Paramètres</div>
         <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight">
           Configure ton <span className="text-gradient">workspace</span>
         </h1>
@@ -244,16 +282,6 @@ const Settings = () => {
                 {sec.label}
               </a>
             ))}
-            <div className="pt-3 mt-3 border-t border-border/40">
-              <Button
-                onClick={() => saveMutation.mutate()}
-                disabled={saveMutation.isPending}
-                className="w-full bg-gradient-to-r from-primary to-accent text-white"
-              >
-                {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save
-              </Button>
-            </div>
           </nav>
         </aside>
 
@@ -263,16 +291,36 @@ const Settings = () => {
       {/* LinkedIn App Credentials */}
       <Card id="linkedin-app" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LinkIcon className="h-5 w-5" /> LinkedIn App Credentials
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="flex items-center gap-2">
+              <LinkIcon className="h-5 w-5" /> Identifiants de l'app LinkedIn
+            </CardTitle>
+            {isConnected ? (
+              <Badge className="gap-1.5 bg-green-500/15 text-green-500 border border-green-500/30">
+                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" /> Connecté
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="gap-1.5 border-red-500/40 text-red-500">
+                <span className="h-2 w-2 rounded-full bg-red-500" /> Non connecté
+              </Badge>
+            )}
+          </div>
           <CardDescription>
-            Create a LinkedIn app at{" "}
+            Crée une app LinkedIn sur{" "}
             <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" className="text-primary underline">LinkedIn Developers</a>.
-            Add this redirect URL: <code className="bg-muted px-1 rounded text-xs">{window.location.origin}/linkedin/callback</code>
+            Ajoute l'URL de redirection ci-dessous dans la configuration OAuth 2.0 de ton app.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <Label>URL de redirection</Label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-muted px-3 py-2 rounded text-xs break-all">{redirectUrl}</code>
+              <Button type="button" variant="outline" size="icon" onClick={copyRedirect} aria-label="Copier l'URL">
+                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
           <div className="space-y-1">
             <Label>Client ID</Label>
             <Input value={s.linkedin_client_id || ""} onChange={(e) => setS({ ...s, linkedin_client_id: e.target.value })} placeholder="77abc123..." />
@@ -282,9 +330,19 @@ const Settings = () => {
             <Input type="password" value={s.linkedin_client_secret || ""} onChange={(e) => setS({ ...s, linkedin_client_secret: e.target.value })} placeholder="WPL_AP1..." />
           </div>
           <div className="space-y-1">
-            <Label>LinkedIn Page (Organization) ID — optional</Label>
-            <Input value={s.linkedin_organization_id || ""} onChange={(e) => setS({ ...s, linkedin_organization_id: e.target.value })} placeholder="123456789 (leave empty to post on personal profile)" />
-            <p className="text-xs text-muted-foreground">Numeric ID only. Posting to a Page requires LinkedIn MDP approval on your app.</p>
+            <Label>ID de Page LinkedIn (Organisation) — optionnel</Label>
+            <Input value={s.linkedin_organization_id || ""} onChange={(e) => setS({ ...s, linkedin_organization_id: e.target.value })} placeholder="123456789 (laisser vide pour publier sur ton profil)" />
+            <p className="text-xs text-muted-foreground">ID numérique uniquement. Publier sur une Page requiert l'approbation LinkedIn MDP de ton app.</p>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              className="bg-gradient-to-r from-primary to-accent text-white"
+            >
+              {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Enregistrer
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -293,25 +351,28 @@ const Settings = () => {
       <Card id="linkedin-account" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Connect LinkedIn Account
+            Connecter le compte LinkedIn
             <div className="ml-auto">
               {isConnected ? (
-                <Badge className="gap-1 bg-green-500/15 text-green-600 border border-green-500/30"><CheckCircle className="h-3 w-3" /> Connected</Badge>
+                <Badge className="gap-1 bg-green-500/15 text-green-600 border border-green-500/30"><CheckCircle className="h-3 w-3" /> Connecté</Badge>
               ) : isExpired ? (
-                <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" /> Expired</Badge>
+                <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" /> Expiré</Badge>
               ) : (
-                <Badge variant="outline" className="gap-1"><XCircle className="h-3 w-3" /> Not connected</Badge>
+                <Badge variant="outline" className="gap-1"><XCircle className="h-3 w-3" /> Non connecté</Badge>
               )}
             </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
           {isConnected && (
-            <p className="text-xs text-muted-foreground mb-3">Person URN: <code>{s.linkedin_person_urn}</code> · expires {expiresAt?.toLocaleDateString()}</p>
+            <p className="text-xs text-muted-foreground mb-3">Person URN : <code>{s.linkedin_person_urn}</code> · expire le {expiresAt?.toLocaleDateString()}</p>
           )}
-          <Button onClick={handleConnectLinkedIn} disabled={isConnecting} className="w-full">
+          {!hasAppCreds && (
+            <p className="text-xs text-amber-500 mb-3">Renseigne d'abord ton Client ID et Client Secret ci-dessus.</p>
+          )}
+          <Button onClick={handleConnectLinkedIn} disabled={isConnecting || !hasAppCreds} className="w-full">
             {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LinkIcon className="h-4 w-4" />}
-            {isConnected ? "Reconnect LinkedIn" : "Connect with LinkedIn"}
+            {isConnected ? "Reconnecter LinkedIn" : "Se connecter avec LinkedIn"}
           </Button>
         </CardContent>
       </Card>
@@ -319,8 +380,8 @@ const Settings = () => {
       {/* Content Sources */}
       <Card id="sources" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
-          <CardTitle>Content Sources</CardTitle>
-          <CardDescription>URLs and keywords used as inspiration to generate your posts.</CardDescription>
+          <CardTitle>Sources de contenu</CardTitle>
+          <CardDescription>URLs et mots-clés utilisés comme inspiration pour générer tes posts.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex gap-2">
@@ -328,15 +389,15 @@ const Settings = () => {
               <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="url">URL</SelectItem>
-                <SelectItem value="keyword">Keyword</SelectItem>
+                <SelectItem value="keyword">Mot-clé</SelectItem>
               </SelectContent>
             </Select>
             <Input
-              placeholder={newSource.type === "url" ? "https://example.com/news" : "AI, fintech, climate..."}
+              placeholder={newSource.type === "url" ? "https://exemple.com/actualites" : "IA, fintech, climat..."}
               value={newSource.value}
               onChange={(e) => setNewSource({ ...newSource, value: e.target.value })}
             />
-            <Input placeholder="Label (optional)" value={newSource.label} onChange={(e) => setNewSource({ ...newSource, label: e.target.value })} className="w-40" />
+            <Input placeholder="Libellé (optionnel)" value={newSource.label} onChange={(e) => setNewSource({ ...newSource, label: e.target.value })} className="w-40" />
             <Button onClick={() => addSource.mutate()} disabled={!newSource.value.trim()}><Plus className="h-4 w-4" /></Button>
           </div>
 
@@ -352,7 +413,7 @@ const Settings = () => {
                 <Button variant="ghost" size="icon" onClick={() => deleteSource.mutate(src.id)}><Trash2 className="h-4 w-4" /></Button>
               </div>
             )) : (
-              <p className="text-sm text-muted-foreground text-center py-4">No sources yet. Add URLs or keywords above.</p>
+              <p className="text-sm text-muted-foreground text-center py-4">Aucune source. Ajoute des URLs ou mots-clés ci-dessus.</p>
             )}
           </div>
         </CardContent>
@@ -361,12 +422,12 @@ const Settings = () => {
       {/* AI Models */}
       <Card id="ai-models" className="border-border/50 bg-card/60 backdrop-blur-xl scroll-mt-6">
         <CardHeader>
-          <CardTitle>AI Models</CardTitle>
-          <CardDescription>Choose which AI model to use per feature.</CardDescription>
+          <CardTitle>Modèles IA</CardTitle>
+          <CardDescription>Choisis quel modèle utiliser par fonctionnalité.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1">
-            <Label>Post (text) generation model</Label>
+            <Label>Modèle de génération de post (texte)</Label>
             <Select value={s.post_model} onValueChange={(v) => setS({ ...s, post_model: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -375,7 +436,7 @@ const Settings = () => {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Image generation model</Label>
+            <Label>Modèle de génération d'image</Label>
             <Select value={s.image_model} onValueChange={(v) => setS({ ...s, image_model: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -384,18 +445,18 @@ const Settings = () => {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Tone & instructions (optional)</Label>
+            <Label>Ton & instructions (optionnel)</Label>
             <Textarea
               value={s.tone_instructions || ""}
               onChange={(e) => setS({ ...s, tone_instructions: e.target.value })}
-              placeholder="E.g. Professional, witty, focus on B2B SaaS founders. Always end with a question."
+              placeholder="Ex : professionnel, incisif, orienté fondateurs SaaS B2B. Termine toujours par une question."
               rows={3}
             />
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t">
             <div>
-              <Label>Bring your own API keys (BYOK)</Label>
+              <Label>Utilise tes propres clés API (BYOK)</Label>
               <p className="text-xs text-muted-foreground">Utilise tes propres clés au lieu de Lovable AI / connecteurs partagés. Tu ne paies que ce que tu consommes chez chaque fournisseur.</p>
             </div>
             <Switch checked={s.use_byok} onCheckedChange={(v) => setS({ ...s, use_byok: v })} />
@@ -407,7 +468,7 @@ const Settings = () => {
                 <div className="space-y-3">
                   {TEXT_PROVIDERS.map((p) => (
                     <div key={p.field as string} className="space-y-1">
-                      <Label>{p.label} API Key</Label>
+                      <Label>Clé API {p.label}</Label>
                       <Input
                         type="password"
                         autoComplete="off"
@@ -425,12 +486,12 @@ const Settings = () => {
               </div>
 
               <div className="pt-3 border-t">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sources de contenu (web scraping & search)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sources de contenu (scraping & recherche)</p>
                 <div className="space-y-1">
-                  <Label>Firecrawl API Key</Label>
+                  <Label>Clé API Firecrawl</Label>
                   <Input type="password" autoComplete="off" value={s.firecrawl_api_key || ""} onChange={(e) => setS({ ...s, firecrawl_api_key: e.target.value })} placeholder="fc-..." />
                   <p className="text-[11px] text-muted-foreground">
-                    Utilisée pour scraper les URLs et faire les recherches web (mots-clés) dans tes Content Sources.{" "}
+                    Utilisée pour scraper les URLs et faire les recherches web (mots-clés) dans tes Sources.{" "}
                     <a href="https://www.firecrawl.dev/app/api-keys" target="_blank" rel="noreferrer" className="text-primary hover:underline">Récupérer la clé →</a>
                   </p>
                 </div>
@@ -444,9 +505,9 @@ const Settings = () => {
         </CardContent>
       </Card>
 
-      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="w-full bg-gradient-to-r from-primary to-accent text-white glow-primary lg:hidden" size="lg">
+      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="w-full bg-gradient-to-r from-primary to-accent text-white glow-primary" size="lg">
         {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        Save All Settings
+        Enregistrer tous les paramètres
       </Button>
         </div>
       </div>

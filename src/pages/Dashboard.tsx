@@ -44,6 +44,23 @@ const Dashboard = () => {
     },
   });
 
+  const { data: settings } = useQuery({
+    queryKey: ["user_settings_status"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_settings")
+        .select("linkedin_access_token, linkedin_person_urn, linkedin_token_expires_at")
+        .maybeSingle();
+      return data;
+    },
+  });
+
+  const linkedInConnected = !!(
+    settings?.linkedin_access_token &&
+    settings?.linkedin_person_urn &&
+    (!settings?.linkedin_token_expires_at || new Date(settings.linkedin_token_expires_at).getTime() > Date.now())
+  );
+
   const stats = useMemo(() => {
     const total = posts?.length || 0;
     const published = posts?.filter((p) => p.status === "published").length || 0;
@@ -88,6 +105,20 @@ const Dashboard = () => {
 
   return (
     <div className="p-8 max-w-7xl mx-auto animate-fade-in-up">
+      {!linkedInConnected && (
+        <Card className="mb-6 border-amber-500/40 bg-amber-500/10">
+          <CardContent className="p-4 flex items-center gap-3 flex-wrap">
+            <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
+            <p className="text-sm flex-1 min-w-[220px]">
+              Ton compte LinkedIn n'est pas connecté. Configure tes identifiants pour publier tes posts.
+            </p>
+            <Button asChild size="sm" variant="outline" className="border-amber-500/50 hover:bg-amber-500/20">
+              <Link to="/settings#linkedin-app">Configurer LinkedIn</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between mb-10">
         <div>
           <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Analytics</div>
