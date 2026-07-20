@@ -49,8 +49,10 @@ serve(async (req) => {
 
       const { data: settings } = await supabase
         .from("user_settings").select("linkedin_client_id, linkedin_client_secret").eq("user_id", userId).maybeSingle();
-      const clientId = settings?.linkedin_client_id;
-      const clientSecret = settings?.linkedin_client_secret;
+      const clientId = settings?.linkedin_client_id || Deno.env.get("LINKEDIN_CLIENT_ID");
+      const clientSecret = settings?.linkedin_client_secret || Deno.env.get("LINKEDIN_CLIENT_SECRET");
+      if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
+
       if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
 
       const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
