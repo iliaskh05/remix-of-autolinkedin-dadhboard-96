@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Loader2 } from "lucide-react";
+import { getSafeErrorMessage } from "@/lib/errors";
+import { ArrowLeft, Send, Loader2, AlertTriangle, Calendar } from "lucide-react";
+import { format } from "date-fns";
 
 const PostDetail = () => {
   const { id } = useParams();
@@ -14,8 +16,9 @@ const PostDetail = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const { data: post, isLoading } = useQuery({
+  const { data: post, isLoading, isError } = useQuery({
     queryKey: ["post", id],
+    enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("posts")
@@ -37,20 +40,22 @@ const PostDetail = () => {
       return data;
     },
     onSuccess: () => {
-      toast({ title: "Published!", description: "Post published to LinkedIn." });
+      toast({ title: "Publié !", description: "Le post a été publié sur LinkedIn." });
       queryClient.invalidateQueries({ queryKey: ["post", id] });
     },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "Failed to publish post.";
-      const requiresReconnect = message.toLowerCase().includes("reconnect your account") || message.includes("LINKEDIN_TOKEN_EXPIRED");
+    onError: (error: unknown) => {
+      const raw = error instanceof Error ? error.message : "";
+      const requiresReconnect = raw.toLowerCase().includes("reconnect your account") || raw.includes("LINKEDIN_TOKEN_EXPIRED");
 
       toast({
-        title: requiresReconnect ? "LinkedIn reconnection required" : "Publish failed",
-        description: requiresReconnect ? "Your LinkedIn session expired. Open Settings and reconnect, then retry." : message,
+        title: requiresReconnect ? "Reconnexion LinkedIn requise" : "Échec de la publication",
+        description: requiresReconnect
+          ? "Ta session LinkedIn a expiré. Ouvre les Paramètres et reconnecte ton compte, puis réessaie."
+          : getSafeErrorMessage(error, "Impossible de publier ce post."),
         variant: "destructive",
         action: requiresReconnect ? (
-          <ToastAction altText="Open settings" onClick={() => navigate("/settings")}>
-            Settings
+          <ToastAction altText="Ouvrir les paramètres" onClick={() => navigate("/settings")}>
+            Paramètres
           </ToastAction>
         ) : undefined,
       });
@@ -67,12 +72,13 @@ const PostDetail = () => {
     );
   }
 
-  if (!post) {
+  if (isError || !post) {
     return (
       <div className="p-8 text-center">
-        <p className="text-muted-foreground">Post not found</p>
+        <AlertTriangle className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
+        <p className="text-muted-foreground">Post introuvable.</p>
         <Button variant="ghost" asChild className="mt-4">
-          <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Back to Dashboard</Link>
+          <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Retour au tableau de bord</Link>
         </Button>
       </div>
     );
@@ -81,7 +87,7 @@ const PostDetail = () => {
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <Button variant="ghost" asChild className="mb-6">
-        <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Back</Link>
+        <Link to="/dashboard"><ArrowLeft className="h-4 w-4 mr-2" /> Retour</Link>
       </Button>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -89,15 +95,15 @@ const PostDetail = () => {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Post Preview</CardTitle>
-              <Badge variant="secondary">{post.status}</Badge>
+              <CardTitle>Aperçu du post</CardTitle>
+              <Badge variant="secondary" className="capitalize">{post.status}</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {post.image_url && !post.image_url.startsWith("data:") && (
               <img
                 src={post.image_url}
-                alt="Post image"
+                alt="Visuel du post"
                 className="w-full rounded-lg object-cover aspect-video"
               />
             )}
@@ -111,20 +117,26 @@ const PostDetail = () => {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Details</CardTitle>
+              <CardTitle className="text-lg">Détails</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div>
-                <span className="text-muted-foreground">Title:</span>
+                <span className="text-muted-foreground">Titre :</span>
                 <p className="font-medium">{post.title}</p>
               </div>
               <div>
-                <span className="text-muted-foreground">Created:</span>
+                <span className="text-muted-foreground">Créé le :</span>
                 <p>{new Date(post.created_at).toLocaleString()}</p>
               </div>
+              {post.scheduled_at && (
+                <div>
+                  <span className="text-muted-foreground flex items-center gap-1"><Calendar className="h-3 w-3" /> Programmé pour :</span>
+                  <p>{format(new Date(post.scheduled_at), "PPp")}</p>
+                </div>
+              )}
               {post.published_at && (
                 <div>
-                  <span className="text-muted-foreground">Published:</span>
+                  <span className="text-muted-foreground">Publié le :</span>
                   <p>{new Date(post.published_at).toLocaleString()}</p>
                 </div>
               )}
@@ -134,7 +146,7 @@ const PostDetail = () => {
           {post.news_summary && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">News Summary</CardTitle>
+                <CardTitle className="text-lg">Résumé des sources</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">{post.news_summary}</p>
@@ -154,7 +166,7 @@ const PostDetail = () => {
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              {post.status === "failed" ? "Retry publish to LinkedIn" : "Publish to LinkedIn"}
+              {post.status === "failed" ? "Retenter la publication" : "Publier sur LinkedIn"}
             </Button>
           )}
         </div>

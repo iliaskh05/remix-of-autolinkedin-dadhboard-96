@@ -1,14 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+import { buildCorsHeaders } from "../_shared/cors.ts";
+import { fetchWithRetry } from "../_shared/httpRetry.ts";
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req);
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
@@ -89,7 +87,9 @@ serve(async (req) => {
       visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
     };
 
-    const liRes = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+    // Transient 429/5xx from LinkedIn are retried with exponential backoff
+    // instead of immediately marking the post as permanently failed.
+    const liRes = await fetchWithRetry("https://api.linkedin.com/v2/ugcPosts", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -106,7 +106,7 @@ serve(async (req) => {
       await supabase.from("posts").update({ status: invalid ? "ready" : "failed" }).eq("id", postId);
       return json(invalid ? 200 : 500, invalid
         ? { success: false, code: "LINKEDIN_TOKEN_EXPIRED", requiresReconnect: true, error: "Token invalid. Reconnect in Settings." }
-        : { success: false, error: `LinkedIn API error [${liRes.status}]: ${errText}` });
+        : { success: false, error: `LinkedIn a refusé la publication (code ${liRes.status}). Réessaie plus tard.` });
     }
 
     const liData = await liRes.json();
@@ -119,6 +119,6 @@ serve(async (req) => {
     return json(200, { success: true, linkedinPostId: liData.id });
   } catch (e) {
     console.error("publish error", e);
-    return json(500, { success: false, error: e instanceof Error ? e.message : "Failed" });
+    return json(500, { success: false, error: "Échec de la publication." });
   }
 });

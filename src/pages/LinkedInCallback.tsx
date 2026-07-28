@@ -23,6 +23,7 @@ const LinkedInCallback = () => {
 
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
+    const state = params.get("state");
     const error = params.get("error");
 
     if (error) {
@@ -60,6 +61,7 @@ const LinkedInCallback = () => {
           body: {
             action: "exchange_code",
             code,
+            state,
             redirectUri: `${window.location.origin}/linkedin/callback`,
           },
         });

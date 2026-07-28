@@ -16,12 +16,12 @@ import {
   Save, Loader2, Link as LinkIcon, CheckCircle, XCircle,
   AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound, Copy, Check,
 } from "lucide-react";
-import { POST_MODELS, IMAGE_MODELS } from "@/lib/ai-models";
+import { POST_MODELS, IMAGE_MODELS, POST_TONES, POST_LENGTHS } from "@/lib/ai-models";
+import { getSafeErrorMessage } from "@/lib/errors";
 
 type UserSettings = {
   linkedin_client_id: string | null;
   linkedin_client_secret: string | null;
-  linkedin_access_token: string | null;
   linkedin_token_expires_at: string | null;
   linkedin_person_urn: string | null;
   linkedin_organization_id: string | null;
@@ -39,6 +39,9 @@ type UserSettings = {
   openrouter_api_key: string | null;
   firecrawl_api_key: string | null;
   tone_instructions: string | null;
+  post_tone: string | null;
+  post_audience: string | null;
+  post_length: string | null;
 };
 
 type ByokProvider = {
@@ -63,6 +66,18 @@ const TEXT_PROVIDERS: ByokProvider[] = [
 
 const LS_KEY = (uid: string) => `linkedin_app_draft_${uid}`;
 
+// Explicit column list — deliberately excludes `linkedin_access_token`: that
+// bearer token is only ever needed server-side by Edge Functions, never in
+// the browser. "Connected" status only needs the (non-secret) person URN.
+const SETTINGS_COLUMNS = [
+  "user_id", "linkedin_client_id", "linkedin_client_secret", "linkedin_organization_id",
+  "linkedin_person_urn", "linkedin_token_expires_at",
+  "post_model", "image_model", "use_byok",
+  "openai_api_key", "gemini_api_key", "anthropic_api_key", "mistral_api_key", "groq_api_key",
+  "deepseek_api_key", "xai_api_key", "perplexity_api_key", "openrouter_api_key", "firecrawl_api_key",
+  "tone_instructions", "post_tone", "post_audience", "post_length",
+].join(", ");
+
 const Settings = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -86,7 +101,7 @@ const Settings = () => {
         qc.invalidateQueries({ queryKey: ["user_settings"] });
         toast({ title: "LinkedIn connecté" });
       } else {
-        toast({ title: "Échec de la connexion", description: event.data.error, variant: "destructive" });
+        toast({ title: "Échec de la connexion", description: getSafeErrorMessage(event.data.error, "Impossible de connecter LinkedIn."), variant: "destructive" });
       }
     };
     window.addEventListener("message", handler);
@@ -97,12 +112,12 @@ const Settings = () => {
     queryKey: ["user_settings", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data, error } = await supabase.from("user_settings").select("*").eq("user_id", user!.id).maybeSingle();
+      const { data, error } = await supabase.from("user_settings").select(SETTINGS_COLUMNS).eq("user_id", user!.id).maybeSingle();
       if (error) throw error;
-      let base = data as UserSettings | null;
+      let base = data as unknown as UserSettings | null;
       if (!base) {
-        const { data: created } = await supabase.from("user_settings").insert({ user_id: user!.id }).select().single();
-        base = created as UserSettings;
+        const { data: created } = await supabase.from("user_settings").insert({ user_id: user!.id }).select(SETTINGS_COLUMNS).single();
+        base = created as unknown as UserSettings;
       }
       // Merge with localStorage draft (draft wins for unsaved LinkedIn app fields)
       try {
@@ -165,6 +180,9 @@ const Settings = () => {
         openrouter_api_key: s.openrouter_api_key,
         firecrawl_api_key: s.firecrawl_api_key,
         tone_instructions: s.tone_instructions,
+        post_tone: s.post_tone,
+        post_audience: s.post_audience,
+        post_length: s.post_length,
       }).eq("user_id", user.id);
       if (error) throw error;
     },
@@ -172,7 +190,7 @@ const Settings = () => {
       toast({ title: "Paramètres enregistrés" });
       qc.invalidateQueries({ queryKey: ["user_settings"] });
     },
-    onError: (e) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: unknown) => toast({ title: "Erreur", description: getSafeErrorMessage(e), variant: "destructive" }),
   });
 
   const addSource = useMutation({
@@ -219,7 +237,7 @@ const Settings = () => {
     if (!session) {
       toast({
         title: "Connexion requise",
-        description: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn.",
+        description: "Tu dois être connecté à ton compte avant de lier LinkedIn.",
         variant: "destructive",
       });
       navigate("/auth", { state: { linkedinAuthRequired: true, message: "Connecte-toi à ton compte avant de lier LinkedIn." } });
@@ -241,7 +259,7 @@ const Settings = () => {
         if (body?.error === "NOT_AUTHENTICATED") {
           toast({
             title: "Connexion requise",
-            description: body.message || "Connecte-toi à ton compte CommoHedge avant de lier LinkedIn.",
+            description: body.message || "Connecte-toi à ton compte avant de lier LinkedIn.",
             variant: "destructive",
           });
           navigate("/auth", { state: { linkedinAuthRequired: true, message: body.message } });
@@ -257,7 +275,7 @@ const Settings = () => {
         throw new Error("Popup bloquée. Autorise les popups et réessaie.");
       }
     } catch (err) {
-      toast({ title: "Erreur", description: err instanceof Error ? err.message : "Échec", variant: "destructive" });
+      toast({ title: "Erreur", description: getSafeErrorMessage(err), variant: "destructive" });
       setIsConnecting(false);
     }
   };
@@ -279,7 +297,7 @@ const Settings = () => {
 
   const expiresAt = s.linkedin_token_expires_at ? new Date(s.linkedin_token_expires_at) : null;
   const isExpired = expiresAt ? expiresAt.getTime() < Date.now() : false;
-  const hasLinkedIn = !!(s.linkedin_access_token && s.linkedin_person_urn);
+  const hasLinkedIn = !!s.linkedin_person_urn;
   const isConnected = hasLinkedIn && !isExpired;
   const hasAppCreds = !!(s.linkedin_client_id && s.linkedin_client_secret);
 
@@ -477,12 +495,41 @@ const Settings = () => {
               </SelectContent>
             </Select>
           </div>
+          <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t">
+            <div className="space-y-1">
+              <Label>Ton par défaut</Label>
+              <Select value={s.post_tone || ""} onValueChange={(v) => setS({ ...s, post_tone: v })}>
+                <SelectTrigger><SelectValue placeholder="Choisir un ton" /></SelectTrigger>
+                <SelectContent>
+                  {POST_TONES.map((t) => (<SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Longueur par défaut</Label>
+              <Select value={s.post_length || ""} onValueChange={(v) => setS({ ...s, post_length: v })}>
+                <SelectTrigger><SelectValue placeholder="Choisir une longueur" /></SelectTrigger>
+                <SelectContent>
+                  {POST_LENGTHS.map((l) => (<SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="space-y-1">
-            <Label>Ton & instructions (optionnel)</Label>
+            <Label>Cible / audience par défaut</Label>
+            <Input
+              value={s.post_audience || ""}
+              onChange={(e) => setS({ ...s, post_audience: e.target.value })}
+              placeholder="Ex : fondateurs de startups SaaS B2B, recruteurs tech, développeurs seniors…"
+            />
+            <p className="text-[11px] text-muted-foreground">À qui s'adressent tes posts. L'IA adapte le vocabulaire et les exemples.</p>
+          </div>
+          <div className="space-y-1">
+            <Label>Instructions de style additionnelles (optionnel)</Label>
             <Textarea
               value={s.tone_instructions || ""}
               onChange={(e) => setS({ ...s, tone_instructions: e.target.value })}
-              placeholder="Ex : professionnel, incisif, orienté fondateurs SaaS B2B. Termine toujours par une question."
+              placeholder="Ex : incisif, évite le jargon corporate, termine toujours par une question ouverte."
               rows={3}
             />
           </div>

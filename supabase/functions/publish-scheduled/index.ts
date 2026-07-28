@@ -1,14 +1,11 @@
 // Cron-triggered: publishes posts whose scheduled_at <= now()
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCorsHeaders } from "../_shared/cors.ts";
+import { fetchWithRetry } from "../_shared/httpRetry.ts";
+import type { AppSupabaseClient, PostRow } from "../_shared/types.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-async function publishOne(supabase: any, post: any) {
+async function publishOne(supabase: AppSupabaseClient, post: PostRow) {
   const { data: settings } = await supabase
     .from("user_settings")
     .select("linkedin_access_token, linkedin_token_expires_at, linkedin_person_urn, linkedin_organization_id")
@@ -71,7 +68,7 @@ async function publishOne(supabase: any, post: any) {
     visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
   };
 
-  const liRes = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+  const liRes = await fetchWithRetry("https://api.linkedin.com/v2/ugcPosts", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", "X-Restli-Protocol-Version": "2.0.0" },
     body: JSON.stringify(body),
@@ -80,7 +77,7 @@ async function publishOne(supabase: any, post: any) {
     const t = await liRes.text();
     console.error("LinkedIn err", liRes.status, t);
     await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
-    return { id: post.id, ok: false, error: t };
+    return { id: post.id, ok: false, error: `LinkedIn a refusé la publication (code ${liRes.status}).` };
   }
   const liData = await liRes.json();
   await supabase.from("posts").update({
@@ -92,8 +89,24 @@ async function publishOne(supabase: any, post: any) {
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req);
+  const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
+    // This function is meant to be triggered exclusively by pg_cron (via pg_net),
+    // never directly by end users. Require a shared secret once configured.
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    if (cronSecret) {
+      if (req.headers.get("x-cron-secret") !== cronSecret) {
+        return json(401, { success: false, error: "Unauthorized" });
+      }
+    } else {
+      console.warn(
+        "[publish-scheduled] CRON_SECRET is not configured — this endpoint is currently callable by anyone. " +
+          "Set the CRON_SECRET secret and send it as the 'x-cron-secret' header from your cron job to secure it.",
+      );
+    }
+
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: due, error } = await supabase
       .from("posts")

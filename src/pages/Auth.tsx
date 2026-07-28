@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { getSafeErrorMessage } from "@/lib/errors";
 import { Loader2, Zap, AlertCircle } from "lucide-react";
 
 const Auth = () => {
@@ -31,7 +32,7 @@ const Auth = () => {
     setBusy(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
-    if (error) toast({ title: "Sign-in failed", description: error.message, variant: "destructive" });
+    if (error) toast({ title: "Connexion impossible", description: getSafeErrorMessage(error, "Identifiants incorrects."), variant: "destructive" });
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -43,18 +44,26 @@ const Auth = () => {
       options: { emailRedirectTo: window.location.origin },
     });
     setBusy(false);
-    if (error) toast({ title: "Sign-up failed", description: error.message, variant: "destructive" });
-    else toast({ title: "Check your email", description: "Confirm your address to sign in." });
+    if (error) toast({ title: "Inscription impossible", description: getSafeErrorMessage(error, "Réessaie dans un instant."), variant: "destructive" });
+    else toast({ title: "Vérifie ta boîte mail", description: "Confirme ton adresse pour te connecter." });
   };
 
   const handleGoogle = async () => {
     setBusy(true);
     const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
     if (result.error) {
-      toast({ title: "Google sign-in failed", description: String(result.error), variant: "destructive" });
+      toast({ title: "Connexion Google impossible", description: getSafeErrorMessage(result.error), variant: "destructive" });
       setBusy(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -63,44 +72,44 @@ const Auth = () => {
           <div className="mx-auto h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
             <Zap className="h-6 w-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">LinkedIn AutoPost</CardTitle>
-          <CardDescription>Generate & publish AI-powered posts to your LinkedIn page.</CardDescription>
+          <CardTitle className="text-2xl">AutoPost AI</CardTitle>
+          <CardDescription>Génère et publie des posts LinkedIn optimisés par IA.</CardDescription>
         </CardHeader>
         <CardContent>
           {linkedinRedirect?.linkedinAuthRequired && (
-            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-start gap-2">
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-200 text-sm flex items-start gap-2">
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>{linkedinRedirect.message || "Connecte-toi à ton compte CommoHedge avant de lier LinkedIn."}</span>
+              <span>{linkedinRedirect.message || "Connecte-toi à ton compte avant de lier LinkedIn."}</span>
             </div>
           )}
           <Button variant="outline" className="w-full mb-4" onClick={handleGoogle} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue with Google"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continuer avec Google"}
           </Button>
 
           <div className="relative my-4">
             <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">or</span>
+              <span className="bg-card px-2 text-muted-foreground">ou</span>
             </div>
           </div>
 
           <Tabs defaultValue="signin">
             <TabsList className="grid grid-cols-2 w-full">
-              <TabsTrigger value="signin">Sign in</TabsTrigger>
-              <TabsTrigger value="signup">Sign up</TabsTrigger>
+              <TabsTrigger value="signin">Connexion</TabsTrigger>
+              <TabsTrigger value="signup">Créer un compte</TabsTrigger>
             </TabsList>
             <TabsContent value="signin">
               <form onSubmit={handleSignIn} className="space-y-3 mt-4">
                 <div className="space-y-1">
                   <Label htmlFor="e1">Email</Label>
-                  <Input id="e1" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+                  <Input id="e1" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="p1">Password</Label>
-                  <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <Label htmlFor="p1">Mot de passe</Label>
+                  <Input id="p1" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
                 </div>
                 <Button type="submit" className="w-full" disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Se connecter"}
                 </Button>
               </form>
             </TabsContent>
@@ -108,14 +117,14 @@ const Auth = () => {
               <form onSubmit={handleSignUp} className="space-y-3 mt-4">
                 <div className="space-y-1">
                   <Label htmlFor="e2">Email</Label>
-                  <Input id="e2" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+                  <Input id="e2" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="p2">Password</Label>
-                  <Input id="p2" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <Label htmlFor="p2">Mot de passe</Label>
+                  <Input id="p2" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
                 </div>
                 <Button type="submit" className="w-full" disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Créer mon compte"}
                 </Button>
               </form>
             </TabsContent>

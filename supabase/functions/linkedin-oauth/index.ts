@@ -1,13 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCorsHeaders } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+// State TTL for the OAuth CSRF check (get_auth_url -> exchange_code round trip).
+const STATE_TTL_MS = 10 * 60 * 1000;
 
 async function getUserId(req: Request, supabase: ReturnType<typeof createClient>): Promise<string | null> {
   const auth = req.headers.get("Authorization");
@@ -18,10 +14,13 @@ async function getUserId(req: Request, supabase: ReturnType<typeof createClient>
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req);
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { action, code, redirectUri } = await req.json();
+    const { action, code, redirectUri, state: returnedState } = await req.json();
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
@@ -32,7 +31,7 @@ serve(async (req) => {
         return json(401, {
           success: false,
           error: "NOT_AUTHENTICATED",
-          message: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn. Redirection vers la page de connexion...",
+          message: "Tu dois être connecté à ton compte avant de lier LinkedIn. Redirection vers la page de connexion...",
           redirectTo: "/auth",
         });
       }
@@ -45,8 +44,22 @@ serve(async (req) => {
       // Personal-only scopes (organization scopes require LinkedIn MDP approval)
       const scopes = "openid profile w_member_social email";
 
-      // state encodes the user id so the callback can find which user is connecting
+      // state encodes the user id so the callback can find which user is connecting.
+      // It is also persisted server-side (with a short TTL) so exchange_code can
+      // verify it and reject CSRF / stale / mismatched callbacks.
       const state = `${userId}.${crypto.randomUUID()}`;
+      const stateExpiresAt = new Date(Date.now() + STATE_TTL_MS).toISOString();
+      const { error: stateWriteError } = await supabase.from("user_settings").upsert(
+        { user_id: userId, linkedin_oauth_state: state, linkedin_oauth_state_expires_at: stateExpiresAt },
+        { onConflict: "user_id" },
+      );
+      // If we can't persist the CSRF state (e.g. missing column/migration,
+      // RLS issue, DB outage), exchange_code will *always* fail its check.
+      // Fail loudly here instead of producing a confusing downstream error.
+      if (stateWriteError) {
+        console.error("Failed to persist OAuth state:", stateWriteError);
+        return json(500, { success: false, error: "Impossible d'initialiser la connexion LinkedIn (erreur base de données). Contacte le support." });
+      }
       const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(state)}`;
       return json(200, { success: true, authUrl, state });
     }
@@ -57,18 +70,37 @@ serve(async (req) => {
         return json(401, {
           success: false,
           error: "NOT_AUTHENTICATED",
-          message: "Tu dois être connecté à ton compte CommoHedge avant de lier LinkedIn. Redirection vers la page de connexion...",
+          message: "Tu dois être connecté à ton compte avant de lier LinkedIn. Redirection vers la page de connexion...",
           redirectTo: "/auth",
         });
       }
 
       const { data: settings } = await supabase
-        .from("user_settings").select("linkedin_client_id, linkedin_client_secret").eq("user_id", userId).maybeSingle();
+        .from("user_settings")
+        .select("linkedin_client_id, linkedin_client_secret, linkedin_oauth_state, linkedin_oauth_state_expires_at")
+        .eq("user_id", userId).maybeSingle();
       const clientId = settings?.linkedin_client_id || Deno.env.get("LINKEDIN_CLIENT_ID");
       const clientSecret = settings?.linkedin_client_secret || Deno.env.get("LINKEDIN_CLIENT_SECRET");
       if (!clientId || !clientSecret) return json(400, { success: false, error: "LinkedIn app credentials not set." });
 
-
+      // CSRF protection: the state returned by LinkedIn must match the one we
+      // generated for this user in get_auth_url, and must not be expired/reused.
+      const storedState = settings?.linkedin_oauth_state;
+      const storedStateExpiresAt = settings?.linkedin_oauth_state_expires_at;
+      const stateValid =
+        storedState &&
+        returnedState &&
+        storedState === returnedState &&
+        storedStateExpiresAt &&
+        Date.parse(storedStateExpiresAt) > Date.now();
+      // Always clear the stored state so it can't be replayed.
+      await supabase.from("user_settings").update({
+        linkedin_oauth_state: null,
+        linkedin_oauth_state_expires_at: null,
+      }).eq("user_id", userId);
+      if (!stateValid) {
+        return json(400, { success: false, error: "Invalid or expired OAuth state. Please retry connecting LinkedIn." });
+      }
 
       const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
         method: "POST",

@@ -63,36 +63,40 @@ const ImageStudio = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const [prefs, setPrefs] = useState<ImagePrefs>(DEFAULT_PREFS);
-  const [textEnabled, setTextEnabled] = useState(false);
-  const [wordmarkEnabled, setWordmarkEnabled] = useState(false);
+  // Lazy-init directly from storage so the first render already has the real
+  // saved values — avoids a frame where `prefs === DEFAULT_PREFS`, which
+  // previously let the auto-save effect below overwrite localStorage with
+  // defaults before the "load" effect had a chance to run.
+  const [prefs, setPrefs] = useState<ImagePrefs>(() => loadPrefs());
+  const [textEnabled, setTextEnabled] = useState(() => !!loadPrefs().textOverlay);
+  const [wordmarkEnabled, setWordmarkEnabled] = useState(() => !!loadPrefs().wordmark);
   const [newColor, setNewColor] = useState("#3B82F6");
   const [favorites, setFavorites] = useState<{ name: string; colors: string[] }[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [presetName, setPresetName] = useState("");
+  const [hydrated, setHydrated] = useState(false);
 
-  // Load
+  // Load one-off, non-preference state (favorites/presets)
   useEffect(() => {
-    const p = loadPrefs();
-    setPrefs(p);
-    setTextEnabled(!!p.textOverlay);
-    setWordmarkEnabled(!!p.wordmark);
     try {
       const raw = localStorage.getItem(FAV_KEY);
       if (raw) setFavorites(JSON.parse(raw));
     } catch { /* noop */ }
     setPresets(loadPresets());
+    setHydrated(true);
   }, []);
 
-  // Auto-save on change
+  // Auto-save on change — gated on `hydrated` so we never write back before
+  // the initial state (and any one-off migrations) has fully settled.
   useEffect(() => {
+    if (!hydrated) return;
     const final: ImagePrefs = {
       ...prefs,
       textOverlay: textEnabled && prefs.textOverlay?.text ? prefs.textOverlay : undefined,
       wordmark: wordmarkEnabled && prefs.wordmark?.text ? prefs.wordmark : undefined,
     };
     savePrefs(final);
-  }, [prefs, textEnabled, wordmarkEnabled]);
+  }, [prefs, textEnabled, wordmarkEnabled, hydrated]);
 
   const setField = <K extends keyof ImagePrefs>(k: K, v: ImagePrefs[K]) =>
     setPrefs((p) => ({ ...p, [k]: v }));

@@ -280,7 +280,10 @@ export type Database = {
           openai_api_key: string | null
           openrouter_api_key: string | null
           perplexity_api_key: string | null
+          post_audience: string | null
+          post_length: string | null
           post_model: string
+          post_tone: string | null
           tone_instructions: string | null
           updated_at: string
           use_byok: boolean
@@ -305,7 +308,10 @@ export type Database = {
           openai_api_key?: string | null
           openrouter_api_key?: string | null
           perplexity_api_key?: string | null
+          post_audience?: string | null
+          post_length?: string | null
           post_model?: string
+          post_tone?: string | null
           tone_instructions?: string | null
           updated_at?: string
           use_byok?: boolean
@@ -330,7 +336,10 @@ export type Database = {
           openai_api_key?: string | null
           openrouter_api_key?: string | null
           perplexity_api_key?: string | null
+          post_audience?: string | null
+          post_length?: string | null
           post_model?: string
+          post_tone?: string | null
           tone_instructions?: string | null
           updated_at?: string
           use_byok?: boolean

@@ -8,46 +8,32 @@ import { Play, Trash2, Clock, Loader2, CalendarClock, History, Wand2 } from "luc
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import { DAYS } from "@/lib/scheduleUtils";
+import { getSafeErrorMessage } from "@/lib/errors";
+import type { Tables } from "@/integrations/supabase/types";
 
-const DAYS = [
-  { v: 1, label: "Lun" }, { v: 2, label: "Mar" }, { v: 3, label: "Mer" },
-  { v: 4, label: "Jeu" }, { v: 5, label: "Ven" }, { v: 6, label: "Sam" }, { v: 7, label: "Dim" },
-];
-
-type Schedule = {
-  id: string;
-  name: string;
-  prompt: string;
-  saved_source_ids: string[];
-  adhoc_sources: { type: string; value: string }[];
-  days_of_week: number[];
-  hour: number;
-  minute: number;
-  timezone: string;
-  image_mode: "none" | "ai";
-  enabled: boolean;
-  last_run_at: string | null;
-  next_run_at: string | null;
-};
+type Schedule = Tables<"schedules">;
+type ScheduleRun = Tables<"schedule_runs">;
 
 export default function Schedules() {
   const qc = useQueryClient();
   const navigate = useNavigate();
 
-  const { data: schedules, isLoading } = useQuery({
+  const { data: schedules, isLoading, isError: schedulesError } = useQuery({
     queryKey: ["schedules"],
     queryFn: async () => {
       const { data, error } = await supabase.from("schedules").select("*").order("created_at", { ascending: false });
       if (error) throw error;
-      return (data as unknown) as Schedule[];
+      return data;
     },
   });
 
   const { data: runs } = useQuery({
     queryKey: ["schedule_runs"],
     queryFn: async () => {
-      const { data } = await supabase.from("schedule_runs").select("*").order("created_at", { ascending: false }).limit(20);
-      return data || [];
+      const { data, error } = await supabase.from("schedule_runs").select("*").order("created_at", { ascending: false }).limit(20);
+      if (error) throw error;
+      return data;
     },
     refetchInterval: 15000,
   });
@@ -58,6 +44,7 @@ export default function Schedules() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["schedules"] }),
+    onError: (e: unknown) => toast.error(getSafeErrorMessage(e)),
   });
 
   const remove = useMutation({
@@ -66,6 +53,7 @@ export default function Schedules() {
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["schedules"] }); toast.success("Supprimé"); },
+    onError: (e: unknown) => toast.error(getSafeErrorMessage(e)),
   });
 
   const runNow = useMutation({
@@ -79,9 +67,9 @@ export default function Schedules() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["schedules"] });
       qc.invalidateQueries({ queryKey: ["schedule_runs"] });
-      toast.success("Publié !");
+      toast.success("Exécuté avec succès");
     },
-    onError: (e: any) => toast.error(e?.message || "Échec"),
+    onError: (e: unknown) => toast.error(getSafeErrorMessage(e)),
   });
 
   return (
@@ -98,6 +86,10 @@ export default function Schedules() {
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : schedulesError ? (
+        <Card className="p-12 text-center border-destructive/30 bg-destructive/5">
+          <p className="text-sm text-destructive">Impossible de charger tes automatisations. Réessaie dans un instant.</p>
+        </Card>
       ) : !schedules?.length ? (
         <Card className="p-12 text-center">
           <CalendarClock className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
@@ -154,7 +146,7 @@ export default function Schedules() {
             <h2 className="font-semibold">Historique des exécutions</h2>
           </div>
           <div className="space-y-2">
-            {runs.map((r: any) => {
+            {runs.map((r: ScheduleRun) => {
               const sched = schedules?.find((s) => s.id === r.schedule_id);
               return (
                 <div key={r.id} className="flex items-center justify-between text-sm py-2 border-b last:border-0">

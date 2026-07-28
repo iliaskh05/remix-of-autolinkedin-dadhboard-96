@@ -11,10 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Loader2, Send, Eye, Sparkles, BarChart3, Clock, CheckCircle2,
+  Loader2, Sparkles, BarChart3, Clock, CheckCircle2,
   AlertTriangle, Calendar, Plus, FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const ALL_STATUSES = ["draft", "generating", "ready", "scheduled", "published", "failed"] as const;
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "hsl(var(--muted-foreground))",
@@ -35,28 +37,31 @@ const statusBadge: Record<string, string> = {
 };
 
 const Dashboard = () => {
-  const { data: posts, isLoading } = useQuery({
+  const { data: posts, isLoading, isError } = useQuery({
     queryKey: ["posts"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(500);
       if (error) throw error;
       return data;
     },
   });
 
+  // Never fetch the LinkedIn bearer token to the browser just to check a
+  // boolean — the person URN (a non-secret identifier) is enough to know
+  // whether the OAuth flow has completed.
   const { data: settings } = useQuery({
     queryKey: ["user_settings_status"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("user_settings")
-        .select("linkedin_access_token, linkedin_person_urn, linkedin_token_expires_at")
+        .select("linkedin_person_urn, linkedin_token_expires_at")
         .maybeSingle();
+      if (error) throw error;
       return data;
     },
   });
 
   const linkedInConnected = !!(
-    settings?.linkedin_access_token &&
     settings?.linkedin_person_urn &&
     (!settings?.linkedin_token_expires_at || new Date(settings.linkedin_token_expires_at).getTime() > Date.now())
   );
@@ -65,9 +70,12 @@ const Dashboard = () => {
     const total = posts?.length || 0;
     const published = posts?.filter((p) => p.status === "published").length || 0;
     const scheduled = posts?.filter((p) => p.status === "scheduled").length || 0;
-    const drafts = posts?.filter((p) => ["draft", "ready"].includes(p.status)).length || 0;
+    const drafts = posts?.filter((p) => ["draft", "ready", "generating"].includes(p.status)).length || 0;
     const failed = posts?.filter((p) => p.status === "failed").length || 0;
-    const successRate = total ? Math.round((published / total) * 100) : 0;
+    // Only count posts that actually went through a publish attempt —
+    // otherwise drafts sitting in the pipeline artificially deflate the rate.
+    const attempted = published + failed;
+    const successRate = attempted ? Math.round((published / attempted) * 100) : 0;
 
     // Last 14 days activity
     const days = Array.from({ length: 14 }).map((_, i) => {
@@ -84,7 +92,7 @@ const Dashboard = () => {
       };
     });
 
-    const breakdown = ["draft", "ready", "scheduled", "published", "failed"].map((s) => ({
+    const breakdown = ALL_STATUSES.map((s) => ({
       name: s,
       value: posts?.filter((p) => p.status === s).length || 0,
     })).filter((d) => d.value > 0);
@@ -92,13 +100,30 @@ const Dashboard = () => {
     return { total, published, scheduled, drafts, failed, successRate, days, breakdown };
   }, [posts]);
 
-  const upcoming = posts?.filter((p) => p.status === "scheduled").slice(0, 5) || [];
+  const upcoming = useMemo(
+    () =>
+      (posts || [])
+        .filter((p) => p.status === "scheduled" && p.scheduled_at)
+        .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())
+        .slice(0, 5),
+    [posts],
+  );
   const recent = posts?.slice(0, 6) || [];
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-3 text-center px-6">
+        <AlertTriangle className="h-8 w-8 text-destructive" />
+        <p className="text-muted-foreground">Impossible de charger tes données. Réessaie dans un instant.</p>
+        <Button onClick={() => window.location.reload()}>Réessayer</Button>
       </div>
     );
   }

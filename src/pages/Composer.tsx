@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -18,20 +19,27 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Sparkles, Wand2, Image as ImageIcon, Upload, Send, Save, Loader2,
   CalendarIcon, X, Type, RefreshCw, Linkedin, Lightbulb, Globe, Hash, Plus, BookMarked,
-  Repeat, Clock,
+  Repeat, Clock, CheckCircle2, Users, MessageSquare, ChevronDown, Languages,
+  Zap, ThumbsUp, MessageCircle, Share2,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { loadPrefs } from "@/lib/imagePrefs";
+import { isVisualBrief, summarizeVisualBrief, type VisualBrief } from "@/lib/visualBrief";
+import {
+  POST_TONES, POST_LENGTHS, POST_LANGUAGES, DEFAULT_POST_TONE, DEFAULT_POST_LENGTH,
+  DEFAULT_POST_LANGUAGE, languageNameFor,
+} from "@/lib/ai-models";
+import { getSafeErrorMessage } from "@/lib/errors";
+import { DAYS, computeNextRunISO } from "@/lib/scheduleUtils";
+import type { Tables } from "@/integrations/supabase/types";
+
+type ContentSource = Tables<"content_sources">;
+type SourceType = "url" | "keyword" | "idea";
 
 type Mode = "ai" | "manual";
-
-const DAYS = [
-  { v: 1, label: "Lun" }, { v: 2, label: "Mar" }, { v: 3, label: "Mer" },
-  { v: 4, label: "Jeu" }, { v: 5, label: "Ven" }, { v: 6, label: "Sam" }, { v: 7, label: "Dim" },
-];
 
 const Composer = () => {
   const { toast } = useToast();
@@ -45,10 +53,24 @@ const Composer = () => {
   const [textPrompt, setTextPrompt] = useState("");
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [newHashtag, setNewHashtag] = useState("");
+  // Human-in-the-loop: true once the AI produced a draft that still awaits approval.
+  const [awaitingReview, setAwaitingReview] = useState(false);
+
+  // Generation "voice" controls — all optional. By default the AI infers
+  // everything from the topic alone; these are power-user overrides tucked
+  // away behind "Options avancées".
+  const [tone, setTone] = useState<string>(DEFAULT_POST_TONE);
+  const [audience, setAudience] = useState<string>("");
+  const [length, setLength] = useState<string>(DEFAULT_POST_LENGTH);
+  const [language, setLanguage] = useState<string>(DEFAULT_POST_LANGUAGE);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Image
   const [imageMode, setImageMode] = useState<Mode>("ai");
   const [imagePrompt, setImagePrompt] = useState("");
+  const [visualBrief, setVisualBrief] = useState<VisualBrief | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [includeImage, setIncludeImage] = useState(true);
 
@@ -89,7 +111,37 @@ const Composer = () => {
     },
   });
 
+  // Load the user's default voice settings to prefill the controls — once,
+  // so we never clobber the user's in-session choices on a background refetch.
+  const voiceDefaultsApplied = useRef(false);
+  useQuery({
+    queryKey: ["user_settings_voice", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_settings")
+        .select("post_tone, post_audience, post_length")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (data && !voiceDefaultsApplied.current) {
+        voiceDefaultsApplied.current = true;
+        if (data.post_tone) setTone(data.post_tone);
+        if (data.post_audience) setAudience(data.post_audience);
+        if (data.post_length) setLength(data.post_length);
+      }
+      return data ?? null;
+    },
+  });
+
   // (Image Studio is now a preferences editor — no image is sent over.)
+
+  const addHashtag = () => {
+    const v = newHashtag.trim().replace(/^#+/, "").replace(/\s+/g, "");
+    if (!v) return;
+    setHashtags((p) => (p.some((h) => h.toLowerCase() === v.toLowerCase()) ? p : [...p, v]));
+    setNewHashtag("");
+  };
 
   const addAdhoc = () => {
     const v = newSourceValue.trim();
@@ -100,7 +152,13 @@ const Composer = () => {
 
   const [busy, setBusy] = useState<string | null>(null);
 
-  const charCount = content.length;
+  // Ready-to-publish text = body + hashtag block. Used for preview, count & publish.
+  const finalContent = useMemo(() => {
+    const line = hashtags.map((h) => `#${h}`).join(" ");
+    return line ? `${content.trim()}\n\n${line}` : content.trim();
+  }, [content, hashtags]);
+
+  const charCount = finalContent.length;
   const scheduledISO = useMemo(() => {
     if (!scheduleEnabled || !scheduleDate) return null;
     const [h, m] = scheduleTime.split(":").map(Number);
@@ -121,6 +179,10 @@ const Composer = () => {
           mode,
           savedSourceIds: selectedSourceIds,
           sources: adhocSources.map(({ type, value }) => ({ type, value })),
+          tone,
+          audience: audience.trim() || undefined,
+          length,
+          language: languageNameFor(language),
         },
       });
       if (error) throw error;
@@ -128,22 +190,38 @@ const Composer = () => {
       return data;
     },
     onSuccess: (d) => {
-      setContent(d.content);
+      // Prefer the structured fields; fall back to the assembled content for safety.
+      setContent(d.post_body ?? d.content ?? "");
+      setHashtags(Array.isArray(d.hashtags) ? d.hashtags : []);
       if (!title) setTitle(d.title);
-      toast({ title: "Texte généré ✨" });
+      // Two-layer image pipeline: keep the structured visual_brief for the
+      // Edge Function, and show a compact summary in the editable textarea.
+      if (isVisualBrief(d.visual_brief)) {
+        setVisualBrief(d.visual_brief);
+        if (!imagePrompt.trim()) setImagePrompt(d.image_prompt || summarizeVisualBrief(d.visual_brief));
+      } else if (d.image_prompt && !imagePrompt.trim()) {
+        setVisualBrief(null);
+        setImagePrompt(d.image_prompt);
+      }
+      setAwaitingReview(true);
+      toast({ title: "Brouillon généré ✨", description: "Relis et édite avant de publier." });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: unknown) => toast({ title: "Erreur", description: getSafeErrorMessage(e), variant: "destructive" }),
     onSettled: () => setBusy(null),
   });
 
   // ---- AI image ----
   const generateImage = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts?: { visualBrief?: VisualBrief | null; prompt?: string }) => {
       setBusy("image");
       const prefs = loadPrefs();
       const { data, error } = await supabase.functions.invoke("generate-image", {
         body: {
-          prompt: imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
+          // Prefer the structured brief so the server can assemble the
+          // guarded dashboard prompt. Fall back to the free-form textarea
+          // if the user edited it or no brief is available.
+          visualBrief: opts?.visualBrief ?? visualBrief ?? undefined,
+          prompt: opts?.prompt || imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
           inputImageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
           aspectRatio: prefs.aspectRatio,
           style: prefs.style,
@@ -162,7 +240,7 @@ const Composer = () => {
       setImageUrl(url);
       toast({ title: "Image générée ✨" });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: unknown) => toast({ title: "Erreur", description: getSafeErrorMessage(e), variant: "destructive" }),
     onSettled: () => setBusy(null),
   });
 
@@ -180,8 +258,8 @@ const Composer = () => {
       const { data } = supabase.storage.from("post-assets").getPublicUrl(path);
       setImageUrl(data.publicUrl);
       toast({ title: "Image téléversée" });
-    } catch (e: any) {
-      toast({ title: "Erreur upload", description: e.message, variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Erreur upload", description: getSafeErrorMessage(e), variant: "destructive" });
     } finally {
       setBusy(null);
     }
@@ -216,13 +294,13 @@ const Composer = () => {
       setAutoOpen(false);
       navigate("/schedules");
     },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: unknown) => toast({ title: "Erreur", description: getSafeErrorMessage(e), variant: "destructive" }),
   });
 
   // ---- Save / Publish / Schedule ----
   const submit = async (action: "draft" | "publish" | "schedule") => {
     if (!user) return;
-    if (!content.trim()) {
+    if (!finalContent.trim()) {
       toast({ title: "Le contenu est requis", variant: "destructive" });
       return;
     }
@@ -236,7 +314,7 @@ const Composer = () => {
       const { data: saved, error } = await supabase.from("posts").insert({
         user_id: user.id,
         title: title || content.slice(0, 60),
-        content,
+        content: finalContent,
         image_url: includeImage ? imageUrl : null,
         status,
         scheduled_at: action === "schedule" ? scheduledISO : null,
@@ -259,37 +337,105 @@ const Composer = () => {
       queryClient.invalidateQueries({ queryKey: ["posts"] });
       // reset
       setContent(""); setTitle(""); setImageUrl(null); setTextPrompt(""); setImagePrompt("");
+      setHashtags([]); setAwaitingReview(false);
       setScheduleEnabled(false); setScheduleDate(undefined);
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Erreur", description: getSafeErrorMessage(e), variant: "destructive" });
     } finally {
       setBusy(null);
     }
   };
 
+  // UI-only orchestrator for the "Génération rapide" card — reuses existing mutations.
+  const runQuickGeneration = async () => {
+    try {
+      const draft = await generateText.mutateAsync("create");
+      if (includeImage) {
+        await generateImage.mutateAsync({
+          visualBrief: isVisualBrief(draft?.visual_brief) ? draft.visual_brief : null,
+          prompt: draft?.image_prompt || imagePrompt,
+        });
+      }
+    } catch {
+      // Errors are already toasted by each mutation's onError.
+    }
+  };
+
+  const editorCardClass = "border border-gray-800/80 bg-[#13161a] text-foreground shadow-none";
+
   return (
     <div className="p-6 lg:p-10 max-w-7xl mx-auto animate-fade-in-up">
       <div className="mb-8">
-        <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">Composer</div>
         <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight">
-          Crée ton <span className="text-gradient">prochain post</span>
+          Crée ton{" "}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-violet-500">
+            prochain post
+          </span>
         </h1>
         <p className="text-muted-foreground mt-2">
-          Trois étapes : nourris l'IA avec des sources, rédige le texte, ajoute l'image. Puis publie ou automatise.
+          Donne un sujet, l'IA rédige le post et suggère une image — tu relis, ajustes et publies.
         </p>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_400px] gap-6">
-        {/* LEFT: editors */}
-        <div className="space-y-6">
+      <div className="grid lg:grid-cols-12 gap-6">
+        {/* LEFT: editor column */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Génération rapide */}
+          <Card className={editorCardClass}>
+            <CardHeader className="border-b border-gray-800/80 pb-4">
+              <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                <Zap className="h-4 w-4 text-blue-400" />
+                Génération rapide
+                <Badge className="ml-1 bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/15">
+                  texte + image en parallèle
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Sujet du post</Label>
+                <Textarea
+                  value={textPrompt}
+                  onChange={(e) => setTextPrompt(e.target.value)}
+                  placeholder="Ex : l'impact des tensions géopolitiques sur le cours du cuivre en 2026…"
+                  rows={4}
+                  className="bg-[#0c0e11] border-gray-800 text-foreground placeholder:text-muted-foreground/60 min-h-[110px]"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
+                <Button
+                  onClick={() => void runQuickGeneration()}
+                  disabled={busy === "text" || busy === "image" || !textPrompt.trim()}
+                  className="bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white shadow-lg shadow-violet-900/20"
+                >
+                  {(busy === "text" || busy === "image") ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Zap className="h-4 w-4" />
+                  )}
+                  Génération texte + image
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Switch checked={includeImage} onCheckedChange={setIncludeImage} id="quick-include-image" />
+                  <Label htmlFor="quick-include-image" className="text-sm text-muted-foreground cursor-pointer">
+                    Inclure une image
+                  </Label>
+                </div>
+                <p className="text-[11px] text-muted-foreground sm:ml-auto sm:max-w-[220px] sm:text-right">
+                  L'IA détermine seule l'angle, le ton et le brief visuel à partir du sujet.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* SOURCES block */}
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-            <CardHeader className="border-b border-border/40">
+          <Card className={editorCardClass}>
+            <CardHeader className="border-b border-gray-800/80">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">1</span>
-                <Lightbulb className="h-4 w-4 text-primary" /> Sources & inspirations
+                <span className="h-6 w-6 rounded-full bg-blue-500/15 text-blue-300 text-xs font-semibold flex items-center justify-center">1</span>
+                <Lightbulb className="h-4 w-4 text-blue-400" /> Sources & inspirations
                 {(selectedSourceIds.length + adhocSources.length) > 0 && (
-                  <Badge variant="secondary" className="ml-1">
+                  <Badge variant="secondary" className="ml-1 bg-gray-900 border border-gray-700">
                     {selectedSourceIds.length + adhocSources.length}
                   </Badge>
                 )}
@@ -307,7 +453,7 @@ const Composer = () => {
                     <BookMarked className="h-3 w-3" /> Sources enregistrées
                   </Label>
                   <div className="grid sm:grid-cols-2 gap-2">
-                    {savedSources.map((src: any) => {
+                    {savedSources.map((src: ContentSource) => {
                       const checked = selectedSourceIds.includes(src.id);
                       return (
                         <label
@@ -315,8 +461,8 @@ const Composer = () => {
                           className={cn(
                             "flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition",
                             checked
-                              ? "border-primary/60 bg-primary/5"
-                              : "border-border/40 bg-background/30 hover:bg-background/50"
+                              ? "border-blue-500/50 bg-blue-500/10"
+                              : "border-gray-800 bg-[#0c0e11] hover:bg-[#10141a]"
                           )}
                         >
                           <Checkbox
@@ -345,8 +491,8 @@ const Composer = () => {
                   Ajout ponctuel (uniquement pour ce post)
                 </Label>
                 <div className="flex gap-2">
-                  <Tabs value={newSourceType} onValueChange={(v) => setNewSourceType(v as any)}>
-                    <TabsList className="h-9">
+                  <Tabs value={newSourceType} onValueChange={(v) => setNewSourceType(v as SourceType)}>
+                    <TabsList className="h-9 bg-[#0c0e11] border border-gray-800">
                       <TabsTrigger value="idea" className="text-xs gap-1"><Lightbulb className="h-3 w-3" />Idée</TabsTrigger>
                       <TabsTrigger value="url" className="text-xs gap-1"><Globe className="h-3 w-3" />URL</TabsTrigger>
                       <TabsTrigger value="keyword" className="text-xs gap-1"><Hash className="h-3 w-3" />Mot-clé</TabsTrigger>
@@ -365,9 +511,9 @@ const Composer = () => {
                         ? "ex: AI agents 2026"
                         : "ex: parler du parallèle entre design et code…"
                     }
-                    className="bg-background/40"
+                    className="bg-[#0c0e11] border-gray-800"
                   />
-                  <Button type="button" variant="outline" onClick={addAdhoc} disabled={!newSourceValue.trim()}>
+                  <Button type="button" variant="outline" onClick={addAdhoc} disabled={!newSourceValue.trim()} className="border-gray-700 bg-[#0c0e11] hover:bg-[#151a21]">
                     <Plus className="h-4 w-4" /> Ajouter
                   </Button>
                 </div>
@@ -378,7 +524,7 @@ const Composer = () => {
                       <Badge
                         key={s.id}
                         variant="secondary"
-                        className="gap-1.5 pl-2 pr-1 py-1 max-w-full"
+                        className="gap-1.5 pl-2 pr-1 py-1 max-w-full bg-gray-900 border border-gray-700"
                       >
                         {s.type === "url" ? <Globe className="h-3 w-3" /> : s.type === "keyword" ? <Hash className="h-3 w-3" /> : <Lightbulb className="h-3 w-3" />}
                         <span className="truncate max-w-[260px]">{s.value}</span>
@@ -398,14 +544,14 @@ const Composer = () => {
           </Card>
 
           {/* TEXT block */}
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-            <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
+          <Card className={editorCardClass}>
+            <CardHeader className="border-b border-gray-800/80 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">2</span>
-                <Type className="h-4 w-4 text-primary" /> Texte du post
+                <span className="h-6 w-6 rounded-full bg-blue-500/15 text-blue-300 text-xs font-semibold flex items-center justify-center">2</span>
+                <Type className="h-4 w-4 text-blue-400" /> Texte du post
               </CardTitle>
               <Tabs value={textMode} onValueChange={(v) => setTextMode(v as Mode)}>
-                <TabsList className="h-8">
+                <TabsList className="h-8 bg-[#0c0e11] border border-gray-800">
                   <TabsTrigger value="ai" className="text-xs gap-1"><Sparkles className="h-3 w-3" />IA</TabsTrigger>
                   <TabsTrigger value="manual" className="text-xs gap-1"><Type className="h-3 w-3" />Manuel</TabsTrigger>
                 </TabsList>
@@ -414,28 +560,82 @@ const Composer = () => {
             <CardContent className="p-5 space-y-4">
               {textMode === "ai" && (
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Sujet / instructions</Label>
-                  <Textarea
-                    value={textPrompt}
-                    onChange={(e) => setTextPrompt(e.target.value)}
-                    placeholder="Ex : un retour d'expérience sur le launch d'un nouveau produit SaaS B2B…"
-                    rows={3}
-                    className="bg-background/40"
-                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Langue & options</Label>
+                    <Select value={language} onValueChange={setLanguage}>
+                      <SelectTrigger className="h-7 w-auto gap-1.5 border-none bg-transparent px-2 text-xs text-muted-foreground hover:bg-[#0c0e11]">
+                        <Languages className="h-3 w-3" /><SelectValue />
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                        {POST_LANGUAGES.map((l) => (<SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition"
+                      >
+                        <ChevronDown className={cn("h-3 w-3 transition-transform", advancedOpen && "rotate-180")} />
+                        Options avancées (ton, longueur, cible)
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2">
+                      <div className="grid sm:grid-cols-2 gap-3 rounded-lg border border-gray-800 bg-[#0c0e11] p-3">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <MessageSquare className="h-3 w-3" /> Ton
+                          </Label>
+                          <Select value={tone} onValueChange={setTone}>
+                            <SelectTrigger className="h-9 bg-[#13161a] border-gray-800"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {POST_TONES.map((t) => (<SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Type className="h-3 w-3" /> Longueur
+                          </Label>
+                          <Select value={length} onValueChange={setLength}>
+                            <SelectTrigger className="h-9 bg-[#13161a] border-gray-800"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {POST_LENGTHS.map((l) => (<SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Users className="h-3 w-3" /> Cible / audience
+                          </Label>
+                          <Input
+                            value={audience}
+                            onChange={(e) => setAudience(e.target.value)}
+                            placeholder="Laisse vide pour que l'IA la déduise du sujet"
+                            className="h-9 bg-[#13161a] border-gray-800"
+                          />
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+
                   <div className="flex gap-2">
                     <Button
                       onClick={() => generateText.mutate("create")}
                       disabled={busy === "text"}
-                      className="bg-gradient-to-r from-primary to-accent text-white"
+                      className="bg-gradient-to-r from-blue-600 to-violet-600 text-white"
                     >
                       {busy === "text" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                      Générer
+                      Générer le texte
                     </Button>
                     {content && (
                       <Button
                         variant="outline"
                         onClick={() => generateText.mutate("improve")}
                         disabled={busy === "text"}
+                        className="border-gray-700 bg-[#0c0e11] hover:bg-[#151a21]"
                       >
                         <RefreshCw className="h-4 w-4" /> Améliorer le brouillon
                       </Button>
@@ -443,9 +643,44 @@ const Composer = () => {
                   </div>
                 </div>
               )}
+
+              {awaitingReview && (
+                <div className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-3 space-y-3 animate-fade-in-up">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-300">
+                    <CheckCircle2 className="h-4 w-4" /> Brouillon généré — à valider
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Rien n'est publié tant que tu n'as pas approuvé. Édite le texte et les hashtags ci-dessous, puis approuve ou régénère.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => submit(scheduleEnabled && scheduledISO ? "schedule" : "publish")}
+                      disabled={!!busy || !finalContent.trim() || (scheduleEnabled && !scheduledISO)}
+                      className="bg-gradient-to-r from-blue-600 to-violet-600 text-white"
+                      size="sm"
+                    >
+                      {busy === "publish" || busy === "schedule"
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <CheckCircle2 className="h-4 w-4" />}
+                      {scheduleEnabled && scheduledISO ? "Approuver & Programmer" : "Approuver & Publier"}
+                    </Button>
+                    <Button
+                      onClick={() => generateText.mutate("create")}
+                      disabled={busy === "text"}
+                      variant="outline"
+                      size="sm"
+                      className="border-gray-700 bg-[#0c0e11]"
+                    >
+                      {busy === "text" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      Régénérer
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Contenu</Label>
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Contenu {hashtags.length > 0 && "(hors hashtags)"}</Label>
                   <span className={cn("text-xs", charCount > 3000 ? "text-destructive" : "text-muted-foreground")}>
                     {charCount} / 3000
                   </span>
@@ -455,26 +690,67 @@ const Composer = () => {
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Écris ton post ici, ou laisse l'IA générer…"
                   rows={12}
-                  className="bg-background/40 font-mono text-sm"
+                  className="bg-[#0c0e11] border-gray-800 font-mono text-sm"
                 />
               </div>
+
               <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <Hash className="h-3 w-3" /> Hashtags
+                </Label>
+                {hashtags.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {hashtags.map((h) => (
+                      <Badge key={h} variant="secondary" className="gap-1 pl-2 pr-1 py-1 bg-gray-900 border border-gray-700">
+                        #{h}
+                        <button
+                          type="button"
+                          onClick={() => setHashtags((p) => p.filter((x) => x !== h))}
+                          className="hover:bg-background/60 rounded p-0.5"
+                          aria-label={`Retirer #${h}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    value={newHashtag}
+                    onChange={(e) => setNewHashtag(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHashtag(); } }}
+                    placeholder="ajouter un hashtag (sans #)"
+                    className="h-9 bg-[#0c0e11] border-gray-800"
+                  />
+                  <Button type="button" variant="outline" onClick={addHashtag} disabled={!newHashtag.trim()} className="border-gray-700 bg-[#0c0e11]">
+                    <Plus className="h-4 w-4" /> Ajouter
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-gray-800/80">
                 <Label className="text-xs uppercase tracking-wider text-muted-foreground">Titre interne (optionnel)</Label>
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Pour t'y retrouver dans l'historique" className="bg-background/40" />
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Pour t'y retrouver dans l'historique"
+                  className="bg-[#0c0e11] border-gray-800"
+                />
               </div>
             </CardContent>
           </Card>
 
           {/* IMAGE block */}
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-            <CardHeader className="border-b border-border/40 flex-row items-center justify-between space-y-0">
+          <Card className={editorCardClass}>
+            <CardHeader className="border-b border-gray-800/80 flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base flex items-center gap-2">
-                <span className="h-6 w-6 rounded-full bg-primary/15 text-primary text-xs font-semibold flex items-center justify-center">3</span>
-                <ImageIcon className="h-4 w-4 text-primary" /> Image
+                <span className="h-6 w-6 rounded-full bg-blue-500/15 text-blue-300 text-xs font-semibold flex items-center justify-center">3</span>
+                <ImageIcon className="h-4 w-4 text-blue-400" /> Image
                 <Switch checked={includeImage} onCheckedChange={setIncludeImage} className="ml-2" />
               </CardTitle>
               <Tabs value={imageMode} onValueChange={(v) => setImageMode(v as Mode)}>
-                <TabsList className="h-8">
+                <TabsList className="h-8 bg-[#0c0e11] border border-gray-800">
                   <TabsTrigger value="ai" className="text-xs gap-1"><Sparkles className="h-3 w-3" />IA</TabsTrigger>
                   <TabsTrigger value="manual" className="text-xs gap-1"><Upload className="h-3 w-3" />Upload</TabsTrigger>
                 </TabsList>
@@ -484,29 +760,36 @@ const Composer = () => {
               <CardContent className="p-5 space-y-4">
                 {imageMode === "ai" ? (
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Prompt image</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Brief visuel (généré automatiquement)</Label>
                     <Textarea
                       value={imagePrompt}
-                      onChange={(e) => setImagePrompt(e.target.value)}
-                      placeholder="Ex : illustration éditoriale minimaliste, dégradé bleu-violet, abstrait…"
-                      rows={2}
-                      className="bg-background/40"
+                      onChange={(e) => {
+                        setImagePrompt(e.target.value);
+                        setVisualBrief(null);
+                      }}
+                      placeholder="Généré automatiquement à partir de ton post — modifiable si besoin."
+                      rows={3}
+                      className="bg-[#0c0e11] border-gray-800"
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      Style, palette, texte intégré → définis tes préférences dans{" "}
-                      <button onClick={() => navigate("/image-studio")} className="text-primary hover:underline">Image Studio</button>.
+                      Le brief (données, titre, labels) est déduit du post — dashboard minimaliste, sans carte ni frontières. Style & palette marque →{" "}
+                      <button onClick={() => navigate("/image-studio")} className="text-blue-400 hover:underline">Image Studio</button>.
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 pt-1">
                       <Button
                         onClick={() => generateImage.mutate()}
                         disabled={busy === "image"}
-                        className="bg-gradient-to-r from-primary to-accent text-white"
+                        className="bg-gradient-to-r from-blue-600 to-violet-600 text-white"
                       >
                         {busy === "image" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                         {imageUrl ? "Régénérer" : "Générer l'image"}
                       </Button>
                       {imageUrl && (
-                        <Button variant="outline" onClick={() => setImageUrl(null)}>
+                        <Button
+                          variant="outline"
+                          onClick={() => setImageUrl(null)}
+                          className="border-gray-700 bg-black/60 text-muted-foreground hover:bg-gray-900 hover:text-foreground"
+                        >
                           <X className="h-4 w-4" /> Retirer
                         </Button>
                       )}
@@ -525,7 +808,7 @@ const Composer = () => {
                       variant="outline"
                       onClick={() => fileRef.current?.click()}
                       disabled={busy === "upload"}
-                      className="w-full border-dashed h-32"
+                      className="w-full border-dashed border-gray-700 h-32 bg-[#0c0e11] hover:bg-[#10141a]"
                     >
                       {busy === "upload" ? <Loader2 className="h-5 w-5 animate-spin" /> : (
                         <div className="flex flex-col items-center gap-2">
@@ -538,7 +821,7 @@ const Composer = () => {
                 )}
 
                 {imageUrl && (
-                  <div className="rounded-xl overflow-hidden ring-1 ring-border/50 bg-background/30">
+                  <div className="rounded-xl overflow-hidden ring-1 ring-gray-800 bg-[#0c0e11]">
                     <img src={imageUrl} alt="preview" className="w-full max-h-80 object-contain" />
                   </div>
                 )}
@@ -547,50 +830,52 @@ const Composer = () => {
           </Card>
         </div>
 
-        {/* RIGHT: preview + actions */}
-        <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl overflow-hidden">
-            <CardHeader className="border-b border-border/40">
+        {/* RIGHT: preview + publication */}
+        <div className="lg:col-span-4 space-y-6 sticky top-6 self-start">
+          <Card className="border border-gray-800/80 overflow-hidden shadow-none bg-transparent">
+            <CardHeader className="border-b border-gray-800/80 bg-[#13161a]">
               <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground">
                 <Linkedin className="h-4 w-4 text-[#0A66C2]" /> Aperçu LinkedIn
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0 bg-white text-neutral-900">
               <div className="p-4 flex items-center gap-3 border-b border-neutral-200">
-                <div className="h-11 w-11 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white font-semibold">
-                  {user?.email?.[0].toUpperCase()}
+                <div className="h-11 w-11 rounded-full bg-gradient-to-tr from-blue-600 to-violet-600 flex items-center justify-center text-white font-semibold">
+                  {user?.email?.[0]?.toUpperCase() || "U"}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{user?.email?.split("@")[0]}</p>
-                  <p className="text-xs text-neutral-500">À l'instant · 🌐</p>
+                  <p className="text-sm font-semibold truncate">{user?.email?.split("@")[0] || "toi"}</p>
+                  <p className="text-xs text-neutral-500 flex items-center gap-1">
+                    À l'instant · <Globe className="h-3 w-3" />
+                  </p>
                 </div>
               </div>
               <div className="px-4 py-3 text-sm whitespace-pre-wrap min-h-[80px]">
-                {content || <span className="text-neutral-400">Ton post apparaîtra ici…</span>}
+                {finalContent || <span className="text-neutral-400">Ton post apparaîtra ici…</span>}
               </div>
               {includeImage && imageUrl && (
                 <div className="border-t border-neutral-200">
                   <img src={imageUrl} alt="" className="w-full max-h-80 object-cover" />
                 </div>
               )}
-              <div className="px-4 py-2 border-t border-neutral-200 flex gap-6 text-xs text-neutral-500">
-                <span>👍 J'aime</span><span>💬 Commenter</span><span>↗ Partager</span>
+              <div className="px-4 py-3 border-t border-neutral-200 flex gap-6 text-xs text-neutral-500">
+                <span className="inline-flex items-center gap-1.5"><ThumbsUp className="h-3.5 w-3.5" /> J'aime</span>
+                <span className="inline-flex items-center gap-1.5"><MessageCircle className="h-3.5 w-3.5" /> Commenter</span>
+                <span className="inline-flex items-center gap-1.5"><Share2 className="h-3.5 w-3.5" /> Partager</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Publish panel */}
-          <Card className="border-border/50 bg-card/60 backdrop-blur-xl">
-            <CardHeader className="border-b border-border/40">
+          <Card className={editorCardClass}>
+            <CardHeader className="border-b border-gray-800/80">
               <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground">
-                <Send className="h-4 w-4 text-primary" /> Publication
+                <Send className="h-4 w-4 text-blue-400" /> Publication
               </CardTitle>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
-              {/* Schedule toggle */}
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2 text-sm">
-                  <CalendarIcon className="h-4 w-4 text-primary" /> Programmer
+                  <CalendarIcon className="h-4 w-4 text-blue-400" /> Programmer
                 </Label>
                 <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} />
               </div>
@@ -598,7 +883,7 @@ const Composer = () => {
                 <div className="space-y-2 animate-fade-in-up">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start", !scheduleDate && "text-muted-foreground")}>
+                      <Button variant="outline" className={cn("w-full justify-start border-gray-700 bg-[#0c0e11]", !scheduleDate && "text-muted-foreground")}>
                         <CalendarIcon className="h-4 w-4" />
                         {scheduleDate ? format(scheduleDate, "PPP") : "Choisir une date"}
                       </Button>
@@ -614,17 +899,16 @@ const Composer = () => {
                       />
                     </PopoverContent>
                   </Popover>
-                  <Input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="bg-background/40" />
+                  <Input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} className="bg-[#0c0e11] border-gray-800" />
                 </div>
               )}
 
-              {/* Primary actions */}
-              <div className="grid gap-2 pt-3 border-t border-border/40">
+              <div className="flex flex-col gap-2 pt-3 border-t border-gray-800/80">
                 {scheduleEnabled ? (
                   <Button
                     onClick={() => submit("schedule")}
-                    disabled={!!busy || !content.trim() || !scheduledISO}
-                    className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                    disabled={!!busy || !finalContent.trim() || !scheduledISO}
+                    className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white"
                     size="lg"
                   >
                     {busy === "schedule" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4" />}
@@ -633,8 +917,8 @@ const Composer = () => {
                 ) : (
                   <Button
                     onClick={() => submit("publish")}
-                    disabled={!!busy || !content.trim()}
-                    className="bg-gradient-to-r from-primary to-accent text-white glow-primary"
+                    disabled={!!busy || !finalContent.trim()}
+                    className="w-full bg-gradient-to-r from-blue-600 to-violet-600 text-white"
                     size="lg"
                   >
                     {busy === "publish" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -643,29 +927,24 @@ const Composer = () => {
                 )}
                 <Button
                   onClick={() => submit("draft")}
-                  disabled={!!busy || !content.trim()}
-                  variant="outline"
+                  disabled={!!busy || !finalContent.trim()}
+                  className="w-full bg-black border border-gray-700 text-foreground hover:bg-gray-900"
                 >
                   {busy === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Enregistrer en brouillon
                 </Button>
-              </div>
-
-              {/* Automate */}
-              <div className="pt-3 border-t border-border/40">
                 <Button
                   onClick={() => { setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation"); setAutoOpen(true); }}
                   disabled={!canAutomate}
-                  variant="outline"
-                  className="w-full border-dashed"
-                  title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un prompt"}
+                  className="w-full bg-black border border-gray-700 text-foreground hover:bg-gray-900"
+                  title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un sujet"}
                 >
                   <Repeat className="h-4 w-4" />
                   Automatiser (récurrent)
                 </Button>
                 {!canAutomate && (
-                  <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
-                    Pour automatiser : texte en mode IA + prompt. Image (si activée) en mode IA aussi.
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Pour automatiser : texte en mode IA + sujet. Image (si activée) en mode IA aussi.
                   </p>
                 )}
               </div>
@@ -742,7 +1021,7 @@ const Composer = () => {
             <Button
               onClick={() => createSchedule.mutate()}
               disabled={createSchedule.isPending || !autoName.trim() || !autoDays.length}
-              className="bg-gradient-to-r from-primary to-accent text-white"
+              className="bg-gradient-to-r from-blue-600 to-violet-600 text-white"
             >
               {createSchedule.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Repeat className="h-4 w-4" />}
               Créer l'automatisation
@@ -753,32 +1032,5 @@ const Composer = () => {
     </div>
   );
 };
-
-// Mirror server-side computeNextRun
-function computeNextRunISO(days: number[], hour: number, minute: number, tz: string): string {
-  const now = new Date();
-  for (let i = 0; i < 14; i++) {
-    const c = new Date(now.getTime() + i * 86400000);
-    const wdName = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(c);
-    const wdMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
-    if (!days.includes(wdMap[wdName])) continue;
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(c);
-    const [y, m, d] = parts.split("-").map(Number);
-    const local = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
-    const asUTC = new Date(local + "Z").getTime();
-    const tzString = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-    }).format(new Date(asUTC));
-    const mm = tzString.match(/(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2})/);
-    let offsetMin = 0;
-    if (mm) {
-      const tzAsUTC = Date.UTC(+mm[3], +mm[1] - 1, +mm[2], +mm[4], +mm[5]);
-      offsetMin = (asUTC - tzAsUTC) / 60000;
-    }
-    const target = new Date(asUTC + offsetMin * 60000);
-    if (target.getTime() > now.getTime()) return target.toISOString();
-  }
-  return new Date(now.getTime() + 86400000).toISOString();
-}
 
 export default Composer;
