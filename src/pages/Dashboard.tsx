@@ -46,6 +46,20 @@ const Dashboard = () => {
     },
   });
 
+  const { data: scheduledQueue } = useQuery({
+    queryKey: ["scheduled_posts"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("scheduled_posts")
+        .select("id, title, scheduled_at, status, error_message")
+        .in("status", ["scheduled", "publishing", "failed"])
+        .order("scheduled_at", { ascending: true })
+        .limit(50);
+      if (error) throw error;
+      return data;
+    },
+  });
+
   // Never fetch the LinkedIn bearer token to the browser just to check a
   // boolean — the person URN (a non-secret identifier) is enough to know
   // whether the OAuth flow has completed.
@@ -69,7 +83,10 @@ const Dashboard = () => {
   const stats = useMemo(() => {
     const total = posts?.length || 0;
     const published = posts?.filter((p) => p.status === "published").length || 0;
-    const scheduled = posts?.filter((p) => p.status === "scheduled").length || 0;
+    const scheduled =
+      scheduledQueue?.filter((p) => p.status === "scheduled" || p.status === "publishing").length ||
+      posts?.filter((p) => p.status === "scheduled").length ||
+      0;
     const drafts = posts?.filter((p) => ["draft", "ready", "generating"].includes(p.status)).length || 0;
     const failed = posts?.filter((p) => p.status === "failed").length || 0;
     // Only count posts that actually went through a publish attempt —
@@ -98,15 +115,14 @@ const Dashboard = () => {
     })).filter((d) => d.value > 0);
 
     return { total, published, scheduled, drafts, failed, successRate, days, breakdown };
-  }, [posts]);
+  }, [posts, scheduledQueue]);
 
   const upcoming = useMemo(
     () =>
-      (posts || [])
-        .filter((p) => p.status === "scheduled" && p.scheduled_at)
-        .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())
+      (scheduledQueue || [])
+        .filter((p) => (p.status === "scheduled" || p.status === "publishing") && p.scheduled_at)
         .slice(0, 5),
-    [posts],
+    [scheduledQueue],
   );
   const recent = posts?.slice(0, 6) || [];
 
@@ -250,17 +266,19 @@ const Dashboard = () => {
             ) : (
               <div className="space-y-2">
                 {upcoming.map((p) => (
-                  <Link key={p.id} to={`/post/${p.id}`} className="flex items-center gap-3 p-3 rounded-lg hover:bg-background/40 transition">
+                  <div key={p.id} className="flex items-center gap-3 p-3 rounded-lg bg-background/20">
                     <div className="h-9 w-9 rounded-lg bg-accent/15 flex items-center justify-center">
                       <Calendar className="h-4 w-4 text-accent" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.title}</p>
+                      <p className="text-sm font-medium truncate">{p.title || "Sans titre"}</p>
                       <p className="text-xs text-muted-foreground">
                         {p.scheduled_at ? format(new Date(p.scheduled_at), "PPp") : "—"}
+                        {p.status === "publishing" ? " · en cours" : ""}
                       </p>
                     </div>
-                  </Link>
+                    <Badge className={cn("shrink-0", statusBadge.scheduled)}>{p.status}</Badge>
+                  </div>
                 ))}
               </div>
             )}

@@ -312,31 +312,51 @@ const Composer = () => {
     }
     setBusy(action);
     try {
-      const status = action === "publish" ? "ready" : action === "schedule" ? "scheduled" : "draft";
-      const { data: saved, error } = await supabase.from("posts").insert({
-        user_id: user.id,
-        title: title || content.slice(0, 60),
-        content: finalContent,
-        image_url: includeImage ? imageUrl : null,
-        status,
-        scheduled_at: action === "schedule" ? scheduledISO : null,
-      }).select().single();
-      if (error) throw error;
+      const postTitle = title || content.slice(0, 60);
+      const postImage = includeImage ? imageUrl : null;
 
-      if (action === "publish") {
-        const { data: pub, error: pubErr } = await supabase.functions.invoke("publish-linkedin", {
-          body: { postId: saved.id },
+      if (action === "schedule") {
+        // One-shot schedule → durable queue consumed by the cron worker.
+        // Do NOT publish immediately and do NOT write to the legacy `posts` queue.
+        const { error } = await supabase.from("scheduled_posts").insert({
+          user_id: user.id,
+          title: postTitle,
+          content: finalContent,
+          image_url: postImage,
+          scheduled_at: scheduledISO!,
+          status: "scheduled",
         });
-        if (pubErr) throw pubErr;
-        if (!pub?.success) throw new Error(pub?.error || "Publish failed");
-        toast({ title: "Publié sur LinkedIn 🎉" });
-      } else if (action === "schedule") {
-        toast({ title: "Programmé", description: `Sera publié le ${format(new Date(scheduledISO!), "PPp")}` });
+        if (error) throw error;
+        toast({
+          title: "Programmé",
+          description: `Sera publié le ${format(new Date(scheduledISO!), "PPp")}`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["scheduled_posts"] });
       } else {
-        toast({ title: "Brouillon enregistré" });
+        const status = action === "publish" ? "ready" : "draft";
+        const { data: saved, error } = await supabase.from("posts").insert({
+          user_id: user.id,
+          title: postTitle,
+          content: finalContent,
+          image_url: postImage,
+          status,
+          scheduled_at: null,
+        }).select().single();
+        if (error) throw error;
+
+        if (action === "publish") {
+          const { data: pub, error: pubErr } = await supabase.functions.invoke("publish-linkedin", {
+            body: { postId: saved.id },
+          });
+          if (pubErr) throw pubErr;
+          if (!pub?.success) throw new Error(pub?.error || "Publish failed");
+          toast({ title: "Publié sur LinkedIn 🎉" });
+        } else {
+          toast({ title: "Brouillon enregistré" });
+        }
+        queryClient.invalidateQueries({ queryKey: ["posts"] });
       }
 
-      queryClient.invalidateQueries({ queryKey: ["posts"] });
       // reset
       setContent(""); setTitle(""); setImageUrl(null); setTextPrompt(""); setImagePrompt("");
       setHashtags([]); setAwaitingReview(false);

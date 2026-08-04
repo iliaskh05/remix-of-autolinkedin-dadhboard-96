@@ -1,11 +1,23 @@
-// Cron-triggered: publishes posts whose status='scheduled' and scheduled_at <= now().
-// Distinct from `run-schedules` (which generates new posts from recurring recipes)
-// and from `publish-linkedin` (which publishes a single post for a logged-in user).
+// Cron-triggered worker for the `scheduled_posts` queue.
+// Selects due rows (status='scheduled' AND scheduled_at <= now()), claims them
+// as 'publishing', posts to LinkedIn, then marks published / failed.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { fetchWithRetry } from "../_shared/httpRetry.ts";
-import type { AppSupabaseClient, PostRow } from "../_shared/types.ts";
+import type { AppSupabaseClient } from "../_shared/types.ts";
+
+type ScheduledPostRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  image_url: string | null;
+  scheduled_at: string;
+  status: string;
+  error_message: string | null;
+  linkedin_post_id: string | null;
+};
 
 type PublishResult = {
   id: string;
@@ -15,15 +27,15 @@ type PublishResult = {
 };
 
 async function claimPost(supabase: AppSupabaseClient, postId: string): Promise<boolean> {
-  // Atomic claim: only one cron worker can flip scheduled → generating.
-  // Prevents double-publish if two cron ticks overlap.
+  // Atomic claim: only one worker can flip scheduled → publishing.
   const { data, error } = await supabase
-    .from("posts")
-    .update({ status: "generating" })
+    .from("scheduled_posts")
+    .update({ status: "publishing", error_message: null })
     .eq("id", postId)
     .eq("status", "scheduled")
     .select("id")
     .maybeSingle();
+
   if (error) {
     console.error("[publish-scheduled-posts] claim failed", postId, error);
     return false;
@@ -31,7 +43,21 @@ async function claimPost(supabase: AppSupabaseClient, postId: string): Promise<b
   return Boolean(data?.id);
 }
 
-async function publishOne(supabase: AppSupabaseClient, post: PostRow): Promise<PublishResult> {
+async function markFailed(
+  supabase: AppSupabaseClient,
+  postId: string,
+  errorMessage: string,
+): Promise<void> {
+  await supabase
+    .from("scheduled_posts")
+    .update({ status: "failed", error_message: errorMessage })
+    .eq("id", postId);
+}
+
+async function publishOne(
+  supabase: AppSupabaseClient,
+  post: ScheduledPostRow,
+): Promise<PublishResult> {
   const { data: settings } = await supabase
     .from("user_settings")
     .select("linkedin_access_token, linkedin_token_expires_at, linkedin_person_urn, linkedin_organization_id")
@@ -44,15 +70,18 @@ async function publishOne(supabase: AppSupabaseClient, post: PostRow): Promise<P
   const expiresAt = settings?.linkedin_token_expires_at;
 
   if (!accessToken || !personUrn) {
-    // Keep as scheduled so a later reconnect + cron tick can retry, but mark
-    // failed when the account is simply not connected at all.
-    await supabase.from("posts").update({ status: "failed" }).eq("id", post.id);
-    return { id: post.id, ok: false, error: "LinkedIn not connected" };
+    const msg = "LinkedIn non connecté. Reconnecte le compte dans Paramètres.";
+    await markFailed(supabase, post.id, msg);
+    return { id: post.id, ok: false, error: msg };
   }
   if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
-    // Revert to scheduled so the user can reconnect and the post still fires.
-    await supabase.from("posts").update({ status: "scheduled" }).eq("id", post.id);
-    return { id: post.id, ok: false, error: "LinkedIn token expired" };
+    const msg = "Token LinkedIn expiré. Reconnecte le compte dans Paramètres.";
+    // Keep retryable: revert to scheduled so a later reconnect can succeed.
+    await supabase
+      .from("scheduled_posts")
+      .update({ status: "scheduled", error_message: msg })
+      .eq("id", post.id);
+    return { id: post.id, ok: false, error: msg };
   }
 
   const authorUrn = organizationId
@@ -85,6 +114,8 @@ async function publishOne(supabase: AppSupabaseClient, post: PostRow): Promise<P
             body: blob,
           });
         }
+      } else {
+        console.warn("[publish-scheduled-posts] image register failed", post.id, reg.status, await reg.text());
       }
     } catch (e) {
       console.error("[publish-scheduled-posts] image upload failed", post.id, e);
@@ -118,27 +149,45 @@ async function publishOne(supabase: AppSupabaseClient, post: PostRow): Promise<P
     const errText = await liRes.text();
     console.error("[publish-scheduled-posts] LinkedIn error", post.id, liRes.status, errText);
     const invalidToken = liRes.status === 401 && errText.includes("INVALID_ACCESS_TOKEN");
-    await supabase
-      .from("posts")
-      .update({ status: invalidToken ? "scheduled" : "failed" })
-      .eq("id", post.id);
-    return {
-      id: post.id,
-      ok: false,
-      error: invalidToken
-        ? "LinkedIn token invalid — post kept scheduled for retry after reconnect"
-        : `LinkedIn a refusé la publication (code ${liRes.status}).`,
-    };
+    const msg = invalidToken
+      ? "Token LinkedIn invalide. Reconnecte le compte dans Paramètres."
+      : `LinkedIn a refusé la publication (code ${liRes.status}).`;
+
+    if (invalidToken) {
+      await supabase
+        .from("scheduled_posts")
+        .update({ status: "scheduled", error_message: msg })
+        .eq("id", post.id);
+    } else {
+      await markFailed(supabase, post.id, msg);
+    }
+    return { id: post.id, ok: false, error: msg };
   }
 
   const liData = await liRes.json();
-  await supabase.from("posts").update({
+  const linkedinPostId = (liData.id as string | undefined) || null;
+  const publishedAt = new Date().toISOString();
+
+  await supabase.from("scheduled_posts").update({
     status: "published",
-    published_at: new Date().toISOString(),
-    linkedin_post_id: liData.id || null,
+    linkedin_post_id: linkedinPostId,
+    published_at: publishedAt,
+    error_message: null,
   }).eq("id", post.id);
 
-  return { id: post.id, ok: true, linkedinPostId: liData.id || null };
+  // Mirror into the historical `posts` feed so Dashboard / History stay complete.
+  await supabase.from("posts").insert({
+    user_id: post.user_id,
+    title: post.title || post.content.slice(0, 60),
+    content: post.content,
+    image_url: post.image_url,
+    status: "published",
+    scheduled_at: post.scheduled_at,
+    published_at: publishedAt,
+    linkedin_post_id: linkedinPostId,
+  });
+
+  return { id: post.id, ok: true, linkedinPostId };
 }
 
 serve(async (req) => {
@@ -152,16 +201,24 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Intended for pg_cron (via pg_net), not end-user calls.
+    // Prefer a dedicated cron secret. Fall back to a Bearer service-role token
+    // so the endpoint can also be invoked from the Supabase dashboard / pg_net
+    // with Authorization: Bearer <SERVICE_ROLE_KEY>.
     const cronSecret = Deno.env.get("CRON_SECRET");
-    if (cronSecret) {
-      if (req.headers.get("x-cron-secret") !== cronSecret) {
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const hasCronSecret = Boolean(cronSecret) && req.headers.get("x-cron-secret") === cronSecret;
+    const hasServiceRole = Boolean(serviceRoleKey) && bearer === serviceRoleKey;
+
+    if (cronSecret || serviceRoleKey) {
+      if (!hasCronSecret && !hasServiceRole) {
         return json(401, { success: false, error: "Unauthorized" });
       }
     } else {
       console.warn(
-        "[publish-scheduled-posts] CRON_SECRET is not configured — this endpoint is currently callable by anyone. " +
-          "Set the CRON_SECRET secret and send it as the 'x-cron-secret' header from your cron job to secure it.",
+        "[publish-scheduled-posts] Neither CRON_SECRET nor SUPABASE_SERVICE_ROLE_KEY is usable for auth — " +
+          "configure CRON_SECRET (preferred) or invoke with the service-role Bearer token.",
       );
     }
 
@@ -171,7 +228,7 @@ serve(async (req) => {
     );
 
     const { data: due, error } = await supabase
-      .from("posts")
+      .from("scheduled_posts")
       .select("*")
       .eq("status", "scheduled")
       .lte("scheduled_at", new Date().toISOString())
@@ -181,7 +238,7 @@ serve(async (req) => {
     if (error) throw error;
 
     const results: PublishResult[] = [];
-    for (const post of (due ?? []) as PostRow[]) {
+    for (const post of (due ?? []) as ScheduledPostRow[]) {
       const claimed = await claimPost(supabase, post.id);
       if (!claimed) continue;
       results.push(await publishOne(supabase, post));

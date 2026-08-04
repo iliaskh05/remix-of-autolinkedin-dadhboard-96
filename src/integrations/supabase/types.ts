@@ -124,6 +124,51 @@ export type Database = {
           },
         ]
       }
+      scheduled_posts: {
+        Row: {
+          id: string
+          user_id: string
+          title: string
+          content: string
+          image_url: string | null
+          scheduled_at: string
+          status: string
+          error_message: string | null
+          linkedin_post_id: string | null
+          published_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          title?: string
+          content: string
+          image_url?: string | null
+          scheduled_at: string
+          status?: string
+          error_message?: string | null
+          linkedin_post_id?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          title?: string
+          content?: string
+          image_url?: string | null
+          scheduled_at?: string
+          status?: string
+          error_message?: string | null
+          linkedin_post_id?: string | null
+          published_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null

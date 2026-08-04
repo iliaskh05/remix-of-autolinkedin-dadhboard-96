@@ -22,6 +22,22 @@ export type PostRow = {
   created_at: string;
 };
 
+/** One-shot publish queue consumed by `publish-scheduled-posts`. */
+export type ScheduledPostRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  image_url: string | null;
+  scheduled_at: string;
+  status: "draft" | "scheduled" | "publishing" | "published" | "failed" | string;
+  error_message: string | null;
+  linkedin_post_id: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type LinkedInSettings = {
   linkedin_access_token: string | null;
   linkedin_token_expires_at: string | null;
