@@ -18,7 +18,7 @@ export function isVisualBrief(value: unknown): value is VisualBrief {
 
 /** Compact preview shown in the Composer textarea (no server guardrails). */
 export function summarizeVisualBrief(brief: VisualBrief): string {
-  const palette = brief.palette?.length ? brief.palette.join(", ") : "dark charcoal, white, amber";
+  const palette = brief.palette?.length ? brief.palette.join(", ") : "navy blue, off-white, muted gold";
   const labels = brief.key_labels?.length ? ` Labels: ${brief.key_labels.join(" | ")}.` : "";
   const title = brief.main_title?.trim() ? `Title: "${brief.main_title}". ` : "";
   return [

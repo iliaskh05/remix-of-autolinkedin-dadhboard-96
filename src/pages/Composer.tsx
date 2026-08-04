@@ -87,6 +87,8 @@ const Composer = () => {
   const [autoHour, setAutoHour] = useState(9);
   const [autoMinute, setAutoMinute] = useState(0);
   const [autoTz, setAutoTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Paris");
+  // Prefills from the Composer language selector when the dialog opens.
+  const [autoLanguage, setAutoLanguage] = useState<PostLanguage>(DEFAULT_POST_LANGUAGE);
 
   // Eligibility for recurring schedule: must use AI text + (no image OR AI image). Manual text/image = static, can't re-run.
   const canAutomate = textMode === "ai" && textPrompt.trim().length > 0 && (!includeImage || imageMode === "ai");
@@ -278,6 +280,7 @@ const Composer = () => {
         user_id: user.id,
         name: autoName.trim(),
         prompt: textPrompt,
+        language: autoLanguage,
         saved_source_ids: selectedSourceIds,
         adhoc_sources: adhocSources.map(({ type, value }) => ({ type, value })),
         days_of_week: autoDays,
@@ -804,7 +807,7 @@ const Composer = () => {
                       className="bg-[#0c0e11] border-gray-800"
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      Le brief (données, titre, labels) est déduit du post — dashboard minimaliste, sans carte ni frontières. Style & palette marque →{" "}
+                      Le brief est déduit du post — infographie claire (isométrique, navy/or), cartes stylisées OK sauf géopolitique. Style & palette marque →{" "}
                       <button onClick={() => navigate("/image-studio")} className="text-blue-400 hover:underline">Image Studio</button>.
                     </p>
                     <div className="flex gap-2 pt-1">
@@ -966,7 +969,11 @@ const Composer = () => {
                   Enregistrer en brouillon
                 </Button>
                 <Button
-                  onClick={() => { setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation"); setAutoOpen(true); }}
+                  onClick={() => {
+                    setAutoName(title || textPrompt.slice(0, 40) || "Mon automatisation");
+                    setAutoLanguage(language);
+                    setAutoOpen(true);
+                  }}
                   disabled={!canAutomate}
                   className="w-full bg-black border border-gray-700 text-foreground hover:bg-gray-900"
                   title={canAutomate ? "" : "Active le mode IA pour le texte (et l'image si activée) et renseigne un sujet"}
@@ -998,6 +1005,25 @@ const Composer = () => {
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Nom</Label>
               <Input value={autoName} onChange={(e) => setAutoName(e.target.value)} placeholder="Ex: Veille IA hebdo" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Languages className="h-3 w-3" /> Langue des posts générés
+              </Label>
+              <Select
+                value={autoLanguage}
+                onValueChange={(v) => isPostLanguage(v) && setAutoLanguage(v)}
+              >
+                <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {POST_LANGUAGES.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Appliquée au texte et aux titres de l'image à chaque exécution.
+              </p>
             </div>
             <div>
               <Label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 block">Jours</Label>
@@ -1044,6 +1070,7 @@ const Composer = () => {
             <div className="rounded-md border border-border/50 bg-background/40 p-3 text-xs space-y-1">
               <div className="flex items-center gap-2 text-muted-foreground"><Clock className="h-3 w-3" /> Récapitulatif</div>
               <p>• Texte : IA — prompt actuel</p>
+              <p>• Langue : {POST_LANGUAGES.find((l) => l.value === autoLanguage)?.label ?? autoLanguage}</p>
               <p>• Image : {includeImage && imageMode === "ai" ? "générée par IA à chaque run" : "aucune"}</p>
               <p>• Sources : {selectedSourceIds.length + adhocSources.length} liée(s)</p>
             </div>

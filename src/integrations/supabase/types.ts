@@ -245,6 +245,7 @@ export type Database = {
           id: string
           image_mode: string
           image_prompt: string | null
+          language: string
           last_run_at: string | null
           minute: number
           name: string
@@ -268,6 +269,7 @@ export type Database = {
           id?: string
           image_mode?: string
           image_prompt?: string | null
+          language?: string
           last_run_at?: string | null
           minute?: number
           name: string
@@ -291,6 +293,7 @@ export type Database = {
           id?: string
           image_mode?: string
           image_prompt?: string | null
+          language?: string
           last_run_at?: string | null
           minute?: number
           name?: string

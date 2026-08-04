@@ -4,16 +4,22 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Play, Trash2, Clock, Loader2, CalendarClock, History, Wand2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Play, Trash2, Clock, Loader2, CalendarClock, History, Wand2, Languages } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { DAYS } from "@/lib/scheduleUtils";
 import { getSafeErrorMessage } from "@/lib/errors";
+import { POST_LANGUAGES, DEFAULT_POST_LANGUAGE, isPostLanguage } from "@/lib/ai-models";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Schedule = Tables<"schedules">;
 type ScheduleRun = Tables<"schedule_runs">;
+
+function languageLabel(code: string | null | undefined): string {
+  return POST_LANGUAGES.find((l) => l.value === code)?.label ?? code ?? DEFAULT_POST_LANGUAGE;
+}
 
 export default function Schedules() {
   const qc = useQueryClient();
@@ -44,6 +50,18 @@ export default function Schedules() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["schedules"] }),
+    onError: (e: unknown) => toast.error(getSafeErrorMessage(e)),
+  });
+
+  const updateLanguage = useMutation({
+    mutationFn: async ({ id, language }: { id: string; language: string }) => {
+      const { error } = await supabase.from("schedules").update({ language }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["schedules"] });
+      toast.success("Langue mise à jour");
+    },
     onError: (e: unknown) => toast.error(getSafeErrorMessage(e)),
   });
 
@@ -103,39 +121,68 @@ export default function Schedules() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {schedules.map((s) => (
-            <Card key={s.id} className="p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <h3 className="font-semibold text-lg">{s.name}</h3>
-                    <Badge variant={s.enabled ? "default" : "secondary"}>{s.enabled ? "Actif" : "Pause"}</Badge>
-                    <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />
-                      {s.days_of_week.map((d) => DAYS.find((x) => x.v === d)?.label).join(" ")} • {String(s.hour).padStart(2, "0")}:{String(s.minute).padStart(2, "0")} {s.timezone}
-                    </Badge>
-                    {s.image_mode === "ai" && <Badge variant="outline">+ image IA</Badge>}
-                    {(s.saved_source_ids?.length || s.adhoc_sources?.length) ? (
-                      <Badge variant="outline">{(s.saved_source_ids?.length || 0) + (s.adhoc_sources?.length || 0)} source(s)</Badge>
-                    ) : null}
+          {schedules.map((s) => {
+            const currentLang = isPostLanguage(s.language) ? s.language : DEFAULT_POST_LANGUAGE;
+            return (
+              <Card key={s.id} className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h3 className="font-semibold text-lg">{s.name}</h3>
+                      <Badge variant={s.enabled ? "default" : "secondary"}>{s.enabled ? "Actif" : "Pause"}</Badge>
+                      <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />
+                        {s.days_of_week.map((d) => DAYS.find((x) => x.v === d)?.label).join(" ")} • {String(s.hour).padStart(2, "0")}:{String(s.minute).padStart(2, "0")} {s.timezone}
+                      </Badge>
+                      <Badge variant="outline" className="gap-1">
+                        <Languages className="h-3 w-3" /> {languageLabel(currentLang)}
+                      </Badge>
+                      {s.image_mode === "ai" && <Badge variant="outline">+ image IA</Badge>}
+                      {(s.saved_source_ids?.length || (Array.isArray(s.adhoc_sources) ? s.adhoc_sources.length : 0)) ? (
+                        <Badge variant="outline">
+                          {(s.saved_source_ids?.length || 0) + (Array.isArray(s.adhoc_sources) ? s.adhoc_sources.length : 0)} source(s)
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{s.prompt}</p>
+                    <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
+                      {s.next_run_at && <span>Prochain : {format(new Date(s.next_run_at), "dd MMM HH:mm")}</span>}
+                      {s.last_run_at && <span>Dernier : {format(new Date(s.last_run_at), "dd MMM HH:mm")}</span>}
+                      <div className="flex items-center gap-2">
+                        <Languages className="h-3.5 w-3.5" />
+                        <span>Langue</span>
+                        <Select
+                          value={currentLang}
+                          onValueChange={(v) => {
+                            if (!isPostLanguage(v)) return;
+                            updateLanguage.mutate({ id: s.id, language: v });
+                          }}
+                          disabled={updateLanguage.isPending}
+                        >
+                          <SelectTrigger className="h-7 w-[130px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {POST_LANGUAGES.map((l) => (
+                              <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{s.prompt}</p>
-                  <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                    {s.next_run_at && <span>Prochain : {format(new Date(s.next_run_at), "dd MMM HH:mm")}</span>}
-                    {s.last_run_at && <span>Dernier : {format(new Date(s.last_run_at), "dd MMM HH:mm")}</span>}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Switch checked={s.enabled} onCheckedChange={(v) => toggleEnabled.mutate({ id: s.id, enabled: v })} />
+                    <Button size="icon" variant="ghost" disabled={runNow.isPending} onClick={() => runNow.mutate(s.id)} title="Run now">
+                      {runNow.isPending && runNow.variables === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => { if (confirm("Supprimer cette automatisation ?")) remove.mutate(s.id); }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Switch checked={s.enabled} onCheckedChange={(v) => toggleEnabled.mutate({ id: s.id, enabled: v })} />
-                  <Button size="icon" variant="ghost" disabled={runNow.isPending} onClick={() => runNow.mutate(s.id)} title="Run now">
-                    {runNow.isPending && runNow.variables === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => { if (confirm("Supprimer cette automatisation ?")) remove.mutate(s.id); }}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       )}
 

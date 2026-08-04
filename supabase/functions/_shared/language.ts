@@ -104,7 +104,7 @@ export function buildImageLanguageRule(lang: LanguageProfile): string {
       : `Lay the typography out left-to-right with flawless ${lang.name} spelling, accents and diacritics.`;
 
   return (
-    `Typography language: render the dashboard title and every label in ${lang.name} (${lang.nativeName}). ` +
+    `Typography language: render the infographic header title and every card/chart label in ${lang.name} (${lang.nativeName}). ` +
     `${script} Keep all numeric values in Western Arabic numerals (0-9). ` +
     "Do not mix in another language, do not invent words, and do not add any text beyond the title and the approved labels."
   );

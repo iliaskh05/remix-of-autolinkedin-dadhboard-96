@@ -52,6 +52,8 @@ export type ScheduleRow = {
   prompt: string;
   tone_instructions: string | null;
   ai_model: string | null;
+  /** Output language code for text + image typography (fr|en|es|ar). */
+  language: string | null;
   saved_source_ids: string[];
   adhoc_sources: { type: "url" | "keyword" | "idea"; value: string }[];
   days_of_week: number[];
