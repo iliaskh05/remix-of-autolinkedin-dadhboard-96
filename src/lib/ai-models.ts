@@ -21,10 +21,12 @@ export const POST_MODELS: AiModel[] = [
 ];
 
 export const IMAGE_MODELS: AiModel[] = [
-  { value: "google/gemini-3.1-flash-image", label: "Nano Banana 2 (default, fast pro quality)", provider: "gemini" },
-  { value: "google/gemini-2.5-flash-image", label: "Nano Banana (fast & cheap)", provider: "gemini" },
-  { value: "google/gemini-3-pro-image", label: "Gemini 3 Pro Image (max quality)", provider: "gemini" },
+  { value: "google/gemini-3-pro-image", label: "Nano Banana Pro — Gemini 3 Pro Image (défaut, qualité max)", provider: "gemini" },
+  { value: "google/gemini-3.1-flash-image", label: "Nano Banana 2 (rapide)", provider: "gemini" },
+  { value: "google/gemini-2.5-flash-image", label: "Nano Banana (rapide & économique)", provider: "gemini" },
 ];
+
+export const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
 
 // Configurable "voice" options for text generation (System Prompt building).
 // The `value` is a stable key sent to the edge function, which maps it to
@@ -54,23 +56,20 @@ export const POST_LENGTHS: PostOption[] = [
 export const DEFAULT_POST_TONE = "auto";
 export const DEFAULT_POST_LENGTH = "auto";
 
-export const POST_LANGUAGES: PostOption[] = [
+// Global language selector: drives both the post copy and the typography
+// rendered inside the generated image. The code is sent as-is to the Edge
+// Functions, which own the mapping to full prompt directives.
+export type PostLanguage = "fr" | "en" | "es" | "ar";
+
+export const POST_LANGUAGES: { value: PostLanguage; label: string }[] = [
   { value: "fr", label: "Français" },
   { value: "en", label: "English" },
   { value: "es", label: "Español" },
-  { value: "de", label: "Deutsch" },
-  { value: "it", label: "Italiano" },
-  { value: "pt", label: "Português" },
+  { value: "ar", label: "العربية" },
 ];
 
-export const DEFAULT_POST_LANGUAGE = "fr";
+export const DEFAULT_POST_LANGUAGE: PostLanguage = "fr";
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  fr: "French", en: "English", es: "Spanish", de: "German", it: "Italian", pt: "Portuguese",
-};
-
-/** Maps a short language code (e.g. "fr") to the English name the AI prompt expects. */
-export function languageNameFor(code: string | null | undefined): string | null {
-  if (!code) return null;
-  return LANGUAGE_NAMES[code] || code;
+export function isPostLanguage(value: unknown): value is PostLanguage {
+  return POST_LANGUAGES.some((l) => l.value === value);
 }

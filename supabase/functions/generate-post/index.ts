@@ -48,7 +48,7 @@ serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const { newsMarkdown } = await req.json();
+    const { newsMarkdown, language } = await req.json();
     if (!newsMarkdown) return json(400, { success: false, error: "newsMarkdown required" });
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -69,7 +69,10 @@ serve(async (req) => {
       openai_api_key: null, gemini_api_key: null, tone_instructions: null,
     };
 
-    const systemPrompt = buildSystemPrompt({ toneInstructions: settings.tone_instructions });
+    const systemPrompt = buildSystemPrompt({
+      toneInstructions: settings.tone_instructions,
+      language,
+    });
     const newsExcerpt = String(newsMarkdown).substring(0, 8000);
 
     const data = await callAi(settings.post_model, settings, [

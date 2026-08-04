@@ -3,6 +3,8 @@
 // Layer 2 (fixed, server-side): premium dark-dashboard production rules that
 // the client can never strip or override.
 
+import { buildImageLanguageRule, resolveLanguage } from "./language.ts";
+
 export type VisualBrief = {
   visual_subject: string;
   setting: string;
@@ -119,15 +121,26 @@ export function summarizeVisualBrief(brief: VisualBrief): string {
   ].join(" ");
 }
 
+export type ImagePromptOptions = {
+  /** Language code or name driving the typography rendered inside the image. */
+  language?: string | null;
+};
+
 /**
  * Layer 1 + Layer 2: turns a structured visual_brief into a fluent English
- * prompt, then concatenates the immutable production rules.
+ * prompt, then concatenates the immutable production rules. The instructions
+ * stay in English (the image model's native language) — only the typography
+ * rendered on the canvas follows the selected language.
  */
-export function buildGuardedImagePrompt(briefOrSubject: VisualBrief | string): string {
+export function buildGuardedImagePrompt(
+  briefOrSubject: VisualBrief | string,
+  options: ImagePromptOptions = {},
+): string {
   const brief =
     typeof briefOrSubject === "string"
       ? visualBriefFromSubject(briefOrSubject)
       : normalizeVisualBrief(briefOrSubject);
+  const lang = resolveLanguage(options.language);
 
   const palette = brief.palette.length
     ? brief.palette.join(", ")
@@ -160,6 +173,7 @@ export function buildGuardedImagePrompt(briefOrSubject: VisualBrief | string): s
     `Dominant color palette on a dark background: ${palette}.`,
     `The main title, rendered as sharp minimalist typography with zero spelling errors, must be exactly: "${brief.main_title}".`,
     labelsBlock,
+    buildImageLanguageRule(lang),
     `Explicitly avoid: ${avoid}.`,
     PRODUCTION_STYLE_RULES,
     IMAGE_NEGATIVE_GUIDELINES,
@@ -170,16 +184,21 @@ export function buildGuardedImagePrompt(briefOrSubject: VisualBrief | string): s
  * Conservative fallback when the first attempt is blocked/empty.
  * Keeps only the core subject + fixed production rules.
  */
-export function buildFallbackImagePrompt(briefOrSubject: VisualBrief | string): string {
+export function buildFallbackImagePrompt(
+  briefOrSubject: VisualBrief | string,
+  options: ImagePromptOptions = {},
+): string {
   const brief =
     typeof briefOrSubject === "string"
       ? visualBriefFromSubject(briefOrSubject)
       : normalizeVisualBrief(briefOrSubject);
+  const lang = resolveLanguage(options.language);
   const shortSubject = brief.visual_subject.split(/[.!?\n]/)[0].slice(0, 140);
   return (
     `A clean minimalist dark-background corporate data dashboard about: ${shortSubject}. ` +
     `Main title exactly: "${brief.main_title}". One or two simple bar charts or trend lines, ` +
     `sharp minimalist typography, generous whitespace, no maps, no clutter. ` +
+    `${buildImageLanguageRule(lang)} ` +
     PRODUCTION_STYLE_RULES
   );
 }

@@ -16,7 +16,7 @@ import {
   Save, Loader2, Link as LinkIcon, CheckCircle, XCircle,
   AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound, Copy, Check,
 } from "lucide-react";
-import { POST_MODELS, IMAGE_MODELS, POST_TONES, POST_LENGTHS } from "@/lib/ai-models";
+import { POST_MODELS, IMAGE_MODELS, DEFAULT_IMAGE_MODEL, POST_TONES, POST_LENGTHS } from "@/lib/ai-models";
 import { getSafeErrorMessage } from "@/lib/errors";
 
 type UserSettings = {
@@ -54,7 +54,7 @@ type ByokProvider = {
 
 const TEXT_PROVIDERS: ByokProvider[] = [
   { field: "openai_api_key", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys", hint: "GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5.2." },
-  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Tous Gemini texte + image (2.5/3.x, Nano Banana 1 & 2, Gemini 3 Pro Image)." },
+  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Tous Gemini texte + image (2.5/3.x, Nano Banana 1, 2 et Pro)." },
   { field: "anthropic_api_key", label: "Anthropic Claude", placeholder: "sk-ant-...", url: "https://console.anthropic.com/settings/keys", hint: "Claude Opus, Sonnet, Haiku." },
   { field: "mistral_api_key", label: "Mistral AI", placeholder: "...", url: "https://console.mistral.ai/api-keys", hint: "Mistral Large, Medium, Small, Codestral." },
   { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Llama 3.x, Mixtral — inférence ultra-rapide." },
@@ -488,7 +488,10 @@ const Settings = () => {
           </div>
           <div className="space-y-1">
             <Label>Modèle de génération d'image</Label>
-            <Select value={s.image_model} onValueChange={(v) => setS({ ...s, image_model: v })}>
+            <Select
+              value={IMAGE_MODELS.some((m) => m.value === s.image_model) ? s.image_model : DEFAULT_IMAGE_MODEL}
+              onValueChange={(v) => setS({ ...s, image_model: v })}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {IMAGE_MODELS.map((m) => (<SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>))}

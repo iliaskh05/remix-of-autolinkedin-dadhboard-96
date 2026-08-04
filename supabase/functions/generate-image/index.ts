@@ -9,6 +9,10 @@ import {
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
 
+// Nano Banana Pro (Gemini 3 Pro Image) is the default: best text rendering and
+// composition fidelity for the LinkedIn visuals we generate.
+const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
+
 const ALLOWED_MODELS = [
   "google/gemini-2.5-flash-image",
   "google/gemini-3.1-flash-image-preview",
@@ -42,6 +46,8 @@ const POSITION_LABELS: Record<string, string> = {
 
 type OverlayOpts = {
   aspectRatio?: string;
+  /** Global language selector — drives the typography rendered on the canvas. */
+  language?: string | null;
   /** Optional Image Studio overrides layered AFTER the guarded brief. */
   style?: string;
   mood?: string;
@@ -58,7 +64,7 @@ type OverlayOpts = {
  * Then optional Image Studio overlays (aspect, palette tweak, explicit text).
  */
 function assembleImagePrompt(brief: VisualBrief, overlays: OverlayOpts): string {
-  const parts: string[] = [buildGuardedImagePrompt(brief)];
+  const parts: string[] = [buildGuardedImagePrompt(brief, { language: overlays.language })];
 
   if (overlays.aspectRatio) parts.push(`Aspect ratio: ${overlays.aspectRatio}.`);
   if (overlays.style) parts.push(`Additional visual style preference: ${overlays.style}.`);
@@ -129,6 +135,7 @@ serve(async (req) => {
       aspectRatio,
       textOverlay,
       wordmark,
+      language,
     } = body;
 
     const brief = normalizeVisualBrief(
@@ -154,8 +161,8 @@ serve(async (req) => {
     const { data: s } = await supabase.from("user_settings")
       .select("image_model").eq("user_id", userId).maybeSingle();
 
-    let model = requestedModel || s?.image_model || "google/gemini-3.1-flash-image";
-    if (!ALLOWED_MODELS.includes(model)) model = "google/gemini-3.1-flash-image";
+    let model = requestedModel || s?.image_model || DEFAULT_IMAGE_MODEL;
+    if (!ALLOWED_MODELS.includes(model)) model = DEFAULT_IMAGE_MODEL;
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
@@ -192,6 +199,12 @@ serve(async (req) => {
         }
       }
 
+      // imageSize is only accepted by the Pro image model; Flash models reject it.
+      const imageConfig: Record<string, string> = {};
+      const ratio = normalizeAspectRatio(aspectRatio);
+      if (ratio) imageConfig.aspectRatio = ratio;
+      if (directGeminiModel === "gemini-3-pro-image") imageConfig.imageSize = "2K";
+
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${directGeminiModel}:generateContent`,
         {
@@ -201,9 +214,7 @@ serve(async (req) => {
             contents: [{ role: "user", parts }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"],
-              ...(normalizeAspectRatio(aspectRatio)
-                ? { imageConfig: { aspectRatio: normalizeAspectRatio(aspectRatio) } }
-                : {}),
+              ...(Object.keys(imageConfig).length ? { imageConfig } : {}),
             },
           }),
         },
@@ -256,6 +267,7 @@ serve(async (req) => {
     const callModel = geminiApiKey && directGeminiModel ? callGeminiDirect : callLovableGateway;
     const fullPrompt = assembleImagePrompt(brief, {
       aspectRatio,
+      language,
       style,
       mood,
       colors,
@@ -273,7 +285,7 @@ serve(async (req) => {
     // guideline-only prompt before giving up.
     if (!result.imageUrl && !result.imageBase64) {
       console.warn("generate-image: first attempt blocked/empty, retrying with conservative fallback prompt");
-      result = await callModel(buildFallbackImagePrompt(brief));
+      result = await callModel(buildFallbackImagePrompt(brief, { language }));
     }
 
     if (!result.imageUrl && !result.imageBase64) {

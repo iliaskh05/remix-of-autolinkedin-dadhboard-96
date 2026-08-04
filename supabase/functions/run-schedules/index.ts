@@ -143,7 +143,7 @@ async function generateImage(
 ): Promise<string | null> {
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
   const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-  const selectedModel = model || "google/gemini-3.1-flash-image";
+  const selectedModel = model || "google/gemini-3-pro-image";
   const directGeminiModels: Record<string, string> = {
     "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
     "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
@@ -168,7 +168,11 @@ async function generateImage(
             headers: { "x-goog-api-key": geminiApiKey, "Content-Type": "application/json" },
             body: JSON.stringify({
               contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
-              generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+              generationConfig: {
+                responseModalities: ["TEXT", "IMAGE"],
+                // imageSize is only accepted by the Pro image model.
+                ...(directModel === "gemini-3-pro-image" ? { imageConfig: { imageSize: "2K" } } : {}),
+              },
             }),
           },
         );

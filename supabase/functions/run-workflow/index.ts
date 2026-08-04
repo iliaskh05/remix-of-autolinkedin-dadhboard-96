@@ -18,6 +18,7 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const autoPublish = body.autoPublish ?? false;
+    const language = body.language ?? null;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     // Forward the user's JWT so downstream functions identify the user
@@ -32,7 +33,8 @@ serve(async (req) => {
 
     // 2. generate post
     const postRes = await fetch(`${supabaseUrl}/functions/v1/generate-post`, {
-      method: "POST", headers: fwdHeaders, body: JSON.stringify({ newsMarkdown: scrape.markdown }),
+      method: "POST", headers: fwdHeaders,
+      body: JSON.stringify({ newsMarkdown: scrape.markdown, language }),
     });
     const post = await postRes.json();
     if (!post.success) throw new Error(`Post gen failed: ${post.error}`);
@@ -42,7 +44,12 @@ serve(async (req) => {
     try {
       const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-image`, {
         method: "POST", headers: fwdHeaders,
-        body: JSON.stringify({ prompt: post.imagePrompt, bottomMarginPercent: 0 }),
+        body: JSON.stringify({
+          visualBrief: post.visualBrief,
+          prompt: post.imagePrompt,
+          language,
+          bottomMarginPercent: 0,
+        }),
       });
       const img = await imgRes.json();
       if (img.success) imageUrl = img.imageUrl;

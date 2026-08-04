@@ -30,7 +30,7 @@ import { loadPrefs } from "@/lib/imagePrefs";
 import { isVisualBrief, summarizeVisualBrief, type VisualBrief } from "@/lib/visualBrief";
 import {
   POST_TONES, POST_LENGTHS, POST_LANGUAGES, DEFAULT_POST_TONE, DEFAULT_POST_LENGTH,
-  DEFAULT_POST_LANGUAGE, languageNameFor,
+  DEFAULT_POST_LANGUAGE, isPostLanguage, type PostLanguage,
 } from "@/lib/ai-models";
 import { getSafeErrorMessage } from "@/lib/errors";
 import { DAYS, computeNextRunISO } from "@/lib/scheduleUtils";
@@ -64,7 +64,8 @@ const Composer = () => {
   const [tone, setTone] = useState<string>(DEFAULT_POST_TONE);
   const [audience, setAudience] = useState<string>("");
   const [length, setLength] = useState<string>(DEFAULT_POST_LENGTH);
-  const [language, setLanguage] = useState<string>(DEFAULT_POST_LANGUAGE);
+  // Global: applies to the post copy AND to the typography rendered in the image.
+  const [language, setLanguage] = useState<PostLanguage>(DEFAULT_POST_LANGUAGE);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Image
@@ -182,7 +183,7 @@ const Composer = () => {
           tone,
           audience: audience.trim() || undefined,
           length,
-          language: languageNameFor(language),
+          language,
         },
       });
       if (error) throw error;
@@ -223,6 +224,7 @@ const Composer = () => {
           visualBrief: opts?.visualBrief ?? visualBrief ?? undefined,
           prompt: opts?.prompt || imagePrompt || content.substring(0, 300) || "professional LinkedIn illustration",
           inputImageUrl: imageUrl && !imageUrl.startsWith("data:") ? imageUrl : undefined,
+          language,
           aspectRatio: prefs.aspectRatio,
           style: prefs.style,
           mood: prefs.mood,
@@ -558,20 +560,30 @@ const Composer = () => {
               </Tabs>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-[#0c0e11] px-3 py-2">
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Languages className="h-3 w-3" /> Langue
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Appliquée au texte du post et aux titres affichés sur l'image.
+                  </p>
+                </div>
+                <Select
+                  value={language}
+                  onValueChange={(v) => isPostLanguage(v) && setLanguage(v)}
+                >
+                  <SelectTrigger className="h-8 w-[130px] shrink-0 bg-[#13161a] border-gray-800 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    {POST_LANGUAGES.map((l) => (<SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {textMode === "ai" && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Langue & options</Label>
-                    <Select value={language} onValueChange={setLanguage}>
-                      <SelectTrigger className="h-7 w-auto gap-1.5 border-none bg-transparent px-2 text-xs text-muted-foreground hover:bg-[#0c0e11]">
-                        <Languages className="h-3 w-3" /><SelectValue />
-                      </SelectTrigger>
-                      <SelectContent align="end">
-                        {POST_LANGUAGES.map((l) => (<SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
                     <CollapsibleTrigger asChild>
                       <button
