@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { Part } from "npm:@google/generative-ai";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
 import {
@@ -8,9 +9,8 @@ import {
   normalizeVisualBrief,
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
+import { generateImageWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
 
-// Nano Banana Pro (Gemini 3 Pro Image) is the default: best text rendering and
-// composition fidelity for the LinkedIn visuals we generate.
 const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
 
 const ALLOWED_MODELS = [
@@ -20,17 +20,6 @@ const ALLOWED_MODELS = [
   "google/gemini-3.1-flash-image",
   "google/gemini-3-pro-image",
 ];
-
-// Lovable's gateway prefixes model names with "google/"; Google's native API
-// accepts the bare, current GA model ID. Keep the legacy preview aliases so
-// existing user settings continue to work after the provider migration.
-const DIRECT_GEMINI_MODELS: Record<string, string> = {
-  "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
-  "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
-  "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
-  "google/gemini-3-pro-image": "gemini-3-pro-image",
-};
 
 const POSITION_LABELS: Record<string, string> = {
   "top-left": "top-left corner",
@@ -46,9 +35,7 @@ const POSITION_LABELS: Record<string, string> = {
 
 type OverlayOpts = {
   aspectRatio?: string;
-  /** Global language selector — drives the typography rendered on the canvas. */
   language?: string | null;
-  /** Optional Image Studio overrides layered AFTER the guarded brief. */
   style?: string;
   mood?: string;
   colors?: string[];
@@ -57,12 +44,6 @@ type OverlayOpts = {
   margin?: number;
 };
 
-/**
- * Two-layer assembly:
- * 1. visual_brief → fluent English subject (buildGuardedImagePrompt)
- * 2. immutable production rules already injected inside buildGuardedImagePrompt
- * Then optional Image Studio overlays (aspect, palette tweak, explicit text).
- */
 function assembleImagePrompt(brief: VisualBrief, overlays: OverlayOpts): string {
   const parts: string[] = [buildGuardedImagePrompt(brief, { language: overlays.language })];
 
@@ -93,7 +74,7 @@ function assembleImagePrompt(brief: VisualBrief, overlays: OverlayOpts): string 
 
   if (wantsText) {
     parts.push(
-      "Note: beyond the dashboard title and brief-approved labels, render ONLY the exact user-authored text/wordmark above; do not invent any other writing.",
+      "Note: beyond the infographic title and brief-approved labels, render ONLY the exact user-authored text/wordmark above; do not invent any other writing.",
     );
   }
 
@@ -113,6 +94,28 @@ function isTrustedStorageUrl(value: string, supabaseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function buildImageParts(fullPrompt: string, inputImageUrl?: string): Promise<Part[]> {
+  const parts: Part[] = [{ text: fullPrompt }];
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  if (inputImageUrl && isTrustedStorageUrl(inputImageUrl, supabaseUrl)) {
+    try {
+      const inputResponse = await fetch(inputImageUrl);
+      const mimeType = inputResponse.headers.get("content-type")?.split(";")[0] || "image/png";
+      if (inputResponse.ok && mimeType.startsWith("image/")) {
+        const bytes = new Uint8Array(await inputResponse.arrayBuffer());
+        if (bytes.byteLength <= 7 * 1024 * 1024) {
+          let binary = "";
+          for (const byte of bytes) binary += String.fromCharCode(byte);
+          parts.push({ inlineData: { mimeType, data: btoa(binary) } });
+        }
+      }
+    } catch (error) {
+      console.warn("Could not load the source image for Gemini editing:", error);
+    }
+  }
+  return parts;
 }
 
 serve(async (req) => {
@@ -164,109 +167,15 @@ serve(async (req) => {
     let model = requestedModel || s?.image_model || DEFAULT_IMAGE_MODEL;
     if (!ALLOWED_MODELS.includes(model)) model = DEFAULT_IMAGE_MODEL;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-    const directGeminiModel = DIRECT_GEMINI_MODELS[model];
-    if (!geminiApiKey && !LOVABLE_API_KEY) {
-      return json(500, { success: false, error: "Aucune clé API de génération d'image n'est configurée." });
+    try {
+      getGeminiApiKey();
+    } catch {
+      return json(500, { success: false, error: "Configure GEMINI_API_KEY dans les secrets Supabase." });
     }
 
-    type ModelResult = {
-      imageBase64?: string;
-      imageMimeType?: string;
-      imageUrl?: string;
-      upstreamStatus?: number;
-    };
-    const callGeminiDirect = async (fullPrompt: string): Promise<ModelResult> => {
-      const parts: Array<Record<string, unknown>> = [{ text: fullPrompt }];
-
-      // Only fetch an image from this project's public Storage bucket. This
-      // avoids turning the Edge Function into an SSRF proxy for arbitrary URLs.
-      if (inputImageUrl && isTrustedStorageUrl(inputImageUrl, Deno.env.get("SUPABASE_URL")!)) {
-        try {
-          const inputResponse = await fetch(inputImageUrl);
-          const mimeType = inputResponse.headers.get("content-type")?.split(";")[0] || "image/png";
-          if (inputResponse.ok && mimeType.startsWith("image/")) {
-            const bytes = new Uint8Array(await inputResponse.arrayBuffer());
-            if (bytes.byteLength <= 7 * 1024 * 1024) {
-              let binary = "";
-              for (const byte of bytes) binary += String.fromCharCode(byte);
-              parts.push({ inlineData: { mimeType, data: btoa(binary) } });
-            }
-          }
-        } catch (error) {
-          console.warn("Could not load the source image for Gemini editing:", error);
-        }
-      }
-
-      // imageSize is only accepted by the Pro image model; Flash models reject it.
-      const imageConfig: Record<string, string> = {};
-      const ratio = normalizeAspectRatio(aspectRatio);
-      if (ratio) imageConfig.aspectRatio = ratio;
-      if (directGeminiModel === "gemini-3-pro-image") imageConfig.imageSize = "2K";
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${directGeminiModel}:generateContent`,
-        {
-          method: "POST",
-          headers: { "x-goog-api-key": geminiApiKey!, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts }],
-            generationConfig: {
-              responseModalities: ["TEXT", "IMAGE"],
-              ...(Object.keys(imageConfig).length ? { imageConfig } : {}),
-            },
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        console.error("Gemini image error:", response.status, await response.text());
-        return { upstreamStatus: response.status };
-      }
-
-      const data = await response.json();
-      const imagePart = data.candidates?.[0]?.content?.parts?.find(
-        (part: { inlineData?: { data?: string; mimeType?: string } }) => part.inlineData?.data,
-      );
-      return {
-        imageBase64: imagePart?.inlineData?.data,
-        imageMimeType: imagePart?.inlineData?.mimeType,
-      };
-    };
-
-    const callLovableGateway = async (fullPrompt: string): Promise<ModelResult> => {
-      const userContent: unknown = inputImageUrl
-        ? [
-            { type: "text", text: `Edit this image following these instructions: ${fullPrompt}` },
-            { type: "image_url", image_url: { url: inputImageUrl } },
-          ]
-        : fullPrompt;
-
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: userContent }],
-          modalities: ["image", "text"],
-        }),
-      });
-
-      if (!response.ok) {
-        console.error("AI image error:", response.status, await response.text());
-        return { upstreamStatus: response.status };
-      }
-      const data = await response.json();
-      const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-      return { imageUrl };
-    };
-
-    // Use the project's Gemini API key whenever configured. The Lovable
-    // gateway remains a compatibility fallback for environments without it.
-    const callModel = geminiApiKey && directGeminiModel ? callGeminiDirect : callLovableGateway;
+    const ratio = normalizeAspectRatio(aspectRatio);
     const fullPrompt = assembleImagePrompt(brief, {
-      aspectRatio,
+      aspectRatio: ratio,
       language,
       style,
       mood,
@@ -275,39 +184,44 @@ serve(async (req) => {
       wordmark,
       margin,
     });
+
+    const callModel = async (promptText: string) => {
+      const parts = await buildImageParts(promptText, inputImageUrl);
+      return generateImageWithGemini({
+        prompt: promptText,
+        model,
+        aspectRatio: ratio,
+        parts,
+      });
+    };
+
     let result = await callModel(fullPrompt);
 
-    if (result.upstreamStatus === 429) return json(429, { success: false, error: "Rate limit exceeded." });
-    if (result.upstreamStatus === 402) return json(402, { success: false, error: "Add credits to your workspace." });
+    if ("status" in result && result.status === 429) {
+      return json(429, { success: false, error: "Rate limit exceeded." });
+    }
 
-    // Phase 6 fallback: if the model refused/produced nothing (likely a safety
-    // filter on the styled prompt), retry once with a short, conservative,
-    // guideline-only prompt before giving up.
-    if (!result.imageUrl && !result.imageBase64) {
-      console.warn("generate-image: first attempt blocked/empty, retrying with conservative fallback prompt");
+    if ("status" in result) {
+      console.warn("generate-image: first attempt failed, retrying with conservative fallback prompt");
       result = await callModel(buildFallbackImagePrompt(brief, { language }));
     }
 
-    if (!result.imageUrl && !result.imageBase64) {
+    if ("status" in result) {
       return json(502, {
         success: false,
         error: "La génération d'image a échoué pour ce sujet. Essaie une description différente, ou continue sans image.",
       });
     }
 
-    const dataUrlMatch = result.imageUrl?.match(/^data:(image\/[\w.+-]+);base64,(.+)$/);
-    const base64 = result.imageBase64 || dataUrlMatch?.[2];
-    const mimeType = result.imageMimeType || dataUrlMatch?.[1] || "image/png";
-    if (!base64) {
-      return json(502, { success: false, error: "Le fournisseur IA n'a pas renvoyé de fichier image valide." });
-    }
+    const base64 = result.base64;
+    const mimeType = result.mimeType || "image/png";
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png";
     const fileName = `${userId}/${crypto.randomUUID()}.${extension}`;
     const { error: upErr } = await supabase.storage.from("post-assets").upload(fileName, bytes, { contentType: mimeType });
     if (upErr) {
       console.error("upload err", upErr);
-      return json(200, { success: true, imageUrl: result.imageUrl || `data:${mimeType};base64,${base64}` });
+      return json(200, { success: true, imageUrl: `data:${mimeType};base64,${base64}` });
     }
     const { data: pub } = supabase.storage.from("post-assets").getPublicUrl(fileName);
     return json(200, { success: true, imageUrl: pub.publicUrl });

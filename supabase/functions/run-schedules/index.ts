@@ -4,13 +4,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
 import { fetchWithRetry } from "../_shared/httpRetry.ts";
-import { buildSystemPrompt, WRITE_POST_TOOL, parseWritePostToolCall, type WritePostResult } from "../_shared/textPrompt.ts";
+import { buildSystemPrompt, type WritePostResult } from "../_shared/textPrompt.ts";
 import {
   buildGuardedImagePrompt,
   buildFallbackImagePrompt,
   normalizeVisualBrief,
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
+import { generateWritePostWithGemini, generateImageWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
 import type { AppSupabaseClient, ScheduleRow } from "../_shared/types.ts";
 
 type Source = { type: "url" | "keyword" | "idea"; value: string };
@@ -111,8 +112,8 @@ async function generateText(opts: {
   language: string | null | undefined;
   sourceCtx: string;
   model: string;
-  key: string;
-  url: string;
+  useByok: boolean;
+  openaiKey: string | null;
 }): Promise<WritePostResult> {
   const sys = buildSystemPrompt({
     toneInstructions: opts.toneInstructions,
@@ -123,24 +124,34 @@ async function generateText(opts: {
     : "";
   const userMsg = `Topic: ${opts.prompt || "a relevant, current topic in commodities, finance or global trade."}${sourceBlock}`;
 
-  const res = await fetch(opts.url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${opts.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [{ role: "system", content: sys }, { role: "user", content: userMsg }],
-      tools: [WRITE_POST_TOOL],
-      tool_choice: { type: "function", function: { name: "write_post" } },
-    }),
-  });
-  if (!res.ok) {
-    console.error(`run-schedules text AI error [${res.status}]`, await res.text());
-    throw new Error("AI_TEXT_ERROR");
+  if (opts.useByok && opts.model.startsWith("openai/") && opts.openaiKey) {
+    const { WRITE_POST_TOOL, parseWritePostToolCall } = await import("../_shared/textPrompt.ts");
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.openaiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: opts.model.replace("openai/", ""),
+        messages: [{ role: "system", content: sys }, { role: "user", content: userMsg }],
+        tools: [WRITE_POST_TOOL],
+        tool_choice: { type: "function", function: { name: "write_post" } },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`run-schedules text AI error [${res.status}]`, await res.text());
+      throw new Error("AI_TEXT_ERROR");
+    }
+    const data = await res.json();
+    const tc = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!tc) throw new Error("AI returned no structured data");
+    return parseWritePostToolCall(tc.function.arguments);
   }
-  const data = await res.json();
-  const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) throw new Error("AI returned no structured data");
-  return parseWritePostToolCall(tc.function.arguments);
+
+  getGeminiApiKey();
+  return generateWritePostWithGemini({
+    systemPrompt: sys,
+    userPrompt: userMsg,
+    model: opts.model,
+  });
 }
 
 // ===== AI image (Phase 6 — guarded visual_brief + fallback on rejection) =====
@@ -151,68 +162,32 @@ async function generateImage(
   userId: string,
   language?: string | null,
 ): Promise<string | null> {
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-  const selectedModel = model || "google/gemini-3-pro-image";
-  const directGeminiModels: Record<string, string> = {
-    "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-    "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
-    "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
-    "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
-    "google/gemini-3-pro-image": "gemini-3-pro-image",
-  };
-  const directModel = directGeminiModels[selectedModel];
-  if (!geminiApiKey && !lovableKey) return null;
+  try {
+    getGeminiApiKey();
+  } catch {
+    return null;
+  }
 
+  const selectedModel = model || "google/gemini-3-pro-image";
   const brief = typeof briefOrSubject === "string"
     ? normalizeVisualBrief(null, briefOrSubject)
     : normalizeVisualBrief(briefOrSubject);
 
   const attempt = async (imgPrompt: string): Promise<string | null> => {
     try {
-      if (geminiApiKey && directModel) {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${directModel}:generateContent`,
-          {
-            method: "POST",
-            headers: { "x-goog-api-key": geminiApiKey, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: imgPrompt }] }],
-              generationConfig: {
-                responseModalities: ["TEXT", "IMAGE"],
-                // imageSize is only accepted by the Pro image model.
-                ...(directModel === "gemini-3-pro-image" ? { imageConfig: { imageSize: "2K" } } : {}),
-              },
-            }),
-          },
-        );
-        if (!res.ok) {
-          console.warn("Gemini scheduled image generation failed", res.status, await res.text());
-          return null;
-        }
-        const data = await res.json();
-        const imagePart = data.candidates?.[0]?.content?.parts?.find(
-          (part: { inlineData?: { data?: string; mimeType?: string } }) => part.inlineData?.data,
-        );
-        const base64 = imagePart?.inlineData?.data;
-        if (!base64) return null;
-        return `data:${imagePart.inlineData.mimeType || "image/png"};base64,${base64}`;
-      }
-
-      if (!lovableKey) return null;
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: "user", content: imgPrompt }],
-          modalities: ["image", "text"],
-        }),
+      const result = await generateImageWithGemini({
+        prompt: imgPrompt,
+        model: selectedModel,
       });
-      if (!res.ok) { console.warn("img gen fail", res.status, await res.text()); return null; }
-      const data = await res.json();
-      return data.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? null;
-    } catch (e) { console.warn("img gen threw", e); return null; }
+      if ("status" in result) {
+        console.warn("Gemini scheduled image generation failed", result.status, result.message);
+        return null;
+      }
+      return `data:${result.mimeType};base64,${result.base64}`;
+    } catch (e) {
+      console.warn("img gen threw", e);
+      return null;
+    }
   };
 
   let dataUrl = await attempt(buildGuardedImagePrompt(brief, { language }));
@@ -320,12 +295,13 @@ async function processSchedule(supabase: AppSupabaseClient, sched: ScheduleRow) 
     .select("post_model, use_byok, openai_api_key, tone_instructions, image_model")
     .eq("user_id", userId).maybeSingle();
   let model = sched.ai_model || us?.post_model || "google/gemini-2.5-pro";
-  let url = "https://ai.gateway.lovable.dev/v1/chat/completions";
-  let key = Deno.env.get("LOVABLE_API_KEY");
-  if (us?.use_byok && model.startsWith("openai/") && us.openai_api_key) {
-    url = "https://api.openai.com/v1/chat/completions"; key = us.openai_api_key; model = model.replace("openai/", "");
+  try {
+    getGeminiApiKey();
+  } catch {
+    if (!(us?.use_byok && model.startsWith("openai/") && us.openai_api_key)) {
+      throw new Error("GEMINI_API_KEY not configured");
+    }
   }
-  if (!key) throw new Error("No AI key");
 
   // Try up to 2 generations to avoid duplicate content vs. the schedule's recent history
   let attemptCount = 0;
@@ -339,8 +315,8 @@ async function processSchedule(supabase: AppSupabaseClient, sched: ScheduleRow) 
       language: sched.language || "fr",
       sourceCtx,
       model,
-      key,
-      url,
+      useByok: Boolean(us?.use_byok),
+      openaiKey: us?.openai_api_key ?? null,
     });
     hash = await sha256Hex(g.content.replace(/\s+/g, " ").trim().toLowerCase().substring(0, 500));
     if (!recentHashes.has(hash)) { generated = g; break; }
