@@ -197,7 +197,9 @@ export function buildGuardedImagePrompt(
 
 /**
  * Conservative fallback when the first attempt is blocked/empty.
- * Keeps only the core subject + fixed production rules.
+ * Keeps core subject + fixed production rules — overlays (text, wordmark,
+ * style, colors, aspect…) must be re-applied by the caller via
+ * `appendImageOverlays` so user-authored text is never dropped.
  */
 export function buildFallbackImagePrompt(
   briefOrSubject: VisualBrief | string,
@@ -218,3 +220,90 @@ export function buildFallbackImagePrompt(
     PRODUCTION_STYLE_RULES
   );
 }
+
+/** User/request overlay instructions appended to both primary and fallback prompts. */
+export type ImageOverlayOpts = {
+  aspectRatio?: string;
+  language?: string | null;
+  style?: string;
+  mood?: string;
+  colors?: string[];
+  textOverlay?: { text: string; position: string; weight?: string; color?: string };
+  wordmark?: { text: string; position: string };
+  margin?: number;
+};
+
+const POSITION_LABELS: Record<string, string> = {
+  "top-left": "top-left corner",
+  "top-center": "top center",
+  "top-right": "top-right corner",
+  "center-left": "middle-left",
+  "center": "exact center",
+  "center-right": "middle-right",
+  "bottom-left": "bottom-left corner",
+  "bottom-center": "bottom center",
+  "bottom-right": "bottom-right corner",
+};
+
+/**
+ * Append user overlay constraints. Preserves exact textOverlay / wordmark
+ * spelling, capitalization, numbers and punctuation — never rewrite them.
+ */
+export function appendImageOverlays(basePrompt: string, overlays: ImageOverlayOpts): string {
+  const parts: string[] = [basePrompt];
+
+  if (overlays.aspectRatio) parts.push(`Aspect ratio: ${overlays.aspectRatio}.`);
+  if (overlays.style) parts.push(`Additional visual style preference: ${overlays.style}.`);
+  if (overlays.mood) parts.push(`Additional mood preference: ${overlays.mood}.`);
+  if (overlays.colors?.length) {
+    parts.push(`Prefer these dominant brand colors when compatible with the brief palette: ${overlays.colors.join(", ")}.`);
+  }
+
+  const wantsText = Boolean(overlays.textOverlay?.text || overlays.wordmark?.text);
+  if (overlays.textOverlay?.text) {
+    const pos = POSITION_LABELS[overlays.textOverlay.position] || "center";
+    const weight = overlays.textOverlay.weight || "bold";
+    const color = overlays.textOverlay.color ? ` in ${overlays.textOverlay.color}` : "";
+    parts.push(
+      `EXCEPTION — render this exact user-authored text only (no extra words, no typos, preserve capitalization/numbers/punctuation): "${overlays.textOverlay.text}". ` +
+      `Place it at the ${pos}. Use a ${weight} sans-serif typography${color}, high contrast.`,
+    );
+  }
+  if (overlays.wordmark?.text) {
+    const pos = POSITION_LABELS[overlays.wordmark.position] || "bottom-center";
+    parts.push(
+      `EXCEPTION — add a small wordmark with this exact text (preserve capitalization): "${overlays.wordmark.text}" at the ${pos}, discreet but readable.`,
+    );
+  }
+  if (overlays.margin && overlays.margin > 0) {
+    parts.push(`Keep a clean empty band of approximately ${overlays.margin}% of the image height free of any subject element at the bottom.`);
+  }
+
+  if (wantsText) {
+    parts.push(
+      "Note: beyond the infographic title and brief-approved labels, render ONLY the exact user-authored text/wordmark above; do not invent any other writing.",
+    );
+  }
+
+  return parts.join(" ");
+}
+
+/** Primary image prompt: guarded brief + user overlays. */
+export function assembleImagePrompt(brief: VisualBrief, overlays: ImageOverlayOpts): string {
+  return appendImageOverlays(
+    buildGuardedImagePrompt(brief, { language: overlays.language }),
+    overlays,
+  );
+}
+
+/**
+ * Fallback image prompt: conservative visual base + THE SAME user overlays
+ * (textOverlay, wordmark, style, mood, colors, aspect, margin).
+ */
+export function assembleFallbackImagePrompt(brief: VisualBrief, overlays: ImageOverlayOpts): string {
+  return appendImageOverlays(
+    buildFallbackImagePrompt(brief, { language: overlays.language }),
+    overlays,
+  );
+}
+

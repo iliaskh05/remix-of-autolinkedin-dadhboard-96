@@ -64,11 +64,9 @@ export const GEMINI_TEXT_MODELS = [
 ] as const;
 
 export const GEMINI_IMAGE_MODELS = [
+  "google/gemini-2.5-flash-image",
   "google/gemini-3-pro-image",
   "google/gemini-3.1-flash-image",
-  "google/gemini-2.5-flash-image",
-  "google/gemini-3.1-flash-image-preview",
-  "google/gemini-3-pro-image-preview",
 ] as const;
 
 export const OPENAI_TEXT_MODELS = [
@@ -87,13 +85,27 @@ export const GEMINI_TEXT_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
 };
 
+/**
+ * Known image model ids. Preview aliases map to the same GA API model id
+ * (legacy settings only — not exposed in the Settings UI).
+ */
 export const GEMINI_IMAGE_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
-  "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
-  "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
   "google/gemini-3-pro-image": "gemini-3-pro-image",
+  "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
+  // Legacy / deprecated preview ids → same GA model (not a different family)
+  "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image",
+  "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
+  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
 };
+
+export const DEFAULT_IMAGE_MODEL_ID = "google/gemini-2.5-flash-image";
+
+/** Strip only the known `google/` provider prefix. No other transforms. */
+export function normalizeGoogleModel(modelId: string): string {
+  if (modelId.startsWith("google/")) return modelId.slice("google/".length);
+  return modelId;
+}
 
 export function detectModelOwner(modelId: string): ModelOwner {
   if (modelId.startsWith("openai/")) return "openai";
@@ -102,26 +114,37 @@ export function detectModelOwner(modelId: string): ModelOwner {
 
 export function normalizeGeminiTextModel(modelId: string): string {
   if (GEMINI_TEXT_ALIASES[modelId]) return GEMINI_TEXT_ALIASES[modelId];
-  if (modelId.startsWith("google/")) return modelId.replace(/^google\//, "");
+  if (modelId.startsWith("google/")) return normalizeGoogleModel(modelId);
   if (modelId.startsWith("openai/")) return "gemini-2.5-flash";
   return modelId || "gemini-2.5-flash";
 }
 
+/**
+ * Normalize an image model id for the Google Generative Language API.
+ * - Known aliases → bare GA id
+ * - `google/…` prefix stripped for known bare ids
+ * - Never remaps an unknown model to a different family
+ */
 export function normalizeGeminiImageModel(modelId: string): string {
-  return GEMINI_IMAGE_ALIASES[modelId] ?? (modelId.replace(/^google\//, "") || "gemini-3-pro-image");
+  if (GEMINI_IMAGE_ALIASES[modelId]) return GEMINI_IMAGE_ALIASES[modelId];
+  const bare = normalizeGoogleModel(modelId);
+  const knownBare = new Set(Object.values(GEMINI_IMAGE_ALIASES));
+  if (knownBare.has(bare)) return bare;
+  return bare;
 }
 
 export function normalizeOpenAiModel(modelId: string): string {
   return modelId.replace(/^openai\//, "");
 }
 
+export function isSupportedImageModel(modelId: string): boolean {
+  return Boolean(GEMINI_IMAGE_ALIASES[modelId]) ||
+    Object.values(GEMINI_IMAGE_ALIASES).includes(modelId);
+}
+
 export function isSupportedModel(modelId: string, capability: Capability): boolean {
   if (capability === "image") {
-    return (
-      (GEMINI_IMAGE_MODELS as readonly string[]).includes(modelId) ||
-      Boolean(GEMINI_IMAGE_ALIASES[modelId]) ||
-      (modelId.startsWith("google/") && modelId.includes("image"))
-    );
+    return isSupportedImageModel(modelId);
   }
   return (
     (GEMINI_TEXT_MODELS as readonly string[]).includes(modelId) ||
@@ -141,7 +164,7 @@ export function resolveProvider(
   capability: Capability,
   env: EnvAiKeys = {},
 ): ResolvedProvider {
-  const requestedModel = modelId || (capability === "image" ? "google/gemini-3-pro-image" : "google/gemini-2.5-flash");
+  const requestedModel = modelId || (capability === "image" ? DEFAULT_IMAGE_MODEL_ID : "google/gemini-2.5-flash");
   const owner = detectModelOwner(requestedModel);
 
   if (capability === "image" && owner === "openai") {

@@ -4,77 +4,22 @@ import type { Part } from "npm:@google/generative-ai";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
 import {
-  buildGuardedImagePrompt,
-  buildFallbackImagePrompt,
+  assembleImagePrompt,
+  assembleFallbackImagePrompt,
   normalizeVisualBrief,
-  type VisualBrief,
+  type ImageOverlayOpts,
 } from "../_shared/imagePrompt.ts";
 import { generateImageRouted, pickImageModel } from "../_shared/generateImage.ts";
 import { mapProviderHttpError, type AiUserSettings } from "../_shared/ai-provider.ts";
 
-const POSITION_LABELS: Record<string, string> = {
-  "top-left": "top-left corner",
-  "top-center": "top center",
-  "top-right": "top-right corner",
-  "center-left": "middle-left",
-  "center": "exact center",
-  "center-right": "middle-right",
-  "bottom-left": "bottom-left corner",
-  "bottom-center": "bottom center",
-  "bottom-right": "bottom-right corner",
-};
-
-type OverlayOpts = {
-  aspectRatio?: string;
-  language?: string | null;
-  style?: string;
-  mood?: string;
-  colors?: string[];
-  textOverlay?: { text: string; position: string; weight?: string; color?: string };
-  wordmark?: { text: string; position: string };
-  margin?: number;
-};
-
-function assembleImagePrompt(brief: VisualBrief, overlays: OverlayOpts): string {
-  const parts: string[] = [buildGuardedImagePrompt(brief, { language: overlays.language })];
-
-  if (overlays.aspectRatio) parts.push(`Aspect ratio: ${overlays.aspectRatio}.`);
-  if (overlays.style) parts.push(`Additional visual style preference: ${overlays.style}.`);
-  if (overlays.mood) parts.push(`Additional mood preference: ${overlays.mood}.`);
-  if (overlays.colors?.length) {
-    parts.push(`Prefer these dominant brand colors when compatible with the brief palette: ${overlays.colors.join(", ")}.`);
-  }
-
-  const wantsText = Boolean(overlays.textOverlay?.text || overlays.wordmark?.text);
-  if (overlays.textOverlay?.text) {
-    const pos = POSITION_LABELS[overlays.textOverlay.position] || "center";
-    const weight = overlays.textOverlay.weight || "bold";
-    const color = overlays.textOverlay.color ? ` in ${overlays.textOverlay.color}` : "";
-    parts.push(
-      `EXCEPTION — render this exact user-authored text only (no extra words, no typos): "${overlays.textOverlay.text}". ` +
-      `Place it at the ${pos}. Use a ${weight} sans-serif typography${color}, high contrast.`,
-    );
-  }
-  if (overlays.wordmark?.text) {
-    const pos = POSITION_LABELS[overlays.wordmark.position] || "bottom-center";
-    parts.push(`EXCEPTION — add a small wordmark "${overlays.wordmark.text}" at the ${pos}, discreet but readable.`);
-  }
-  if (overlays.margin && overlays.margin > 0) {
-    parts.push(`Keep a clean empty band of approximately ${overlays.margin}% of the image height free of any subject element at the bottom.`);
-  }
-
-  if (wantsText) {
-    parts.push(
-      "Note: beyond the infographic title and brief-approved labels, render ONLY the exact user-authored text/wordmark above; do not invent any other writing.",
-    );
-  }
-
-  return parts.join(" ");
-}
+/** Ratios exposed by the app → passed through to Gemini imageConfig.aspectRatio. */
+const SUPPORTED_ASPECT_RATIOS = ["1:1", "16:9", "4:5", "3:4", "9:16"] as const;
 
 function normalizeAspectRatio(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  return value.match(/\b(?:1:1|16:9|4:5|3:4|9:16)\b/)?.[0];
+  // Prefer an exact token match so "4:5 portrait" still yields "4:5", never "1:1".
+  const match = value.match(/\b(1:1|16:9|4:5|3:4|9:16)\b/);
+  return match?.[1];
 }
 
 function isTrustedStorageUrl(value: string, supabaseUrl: string): boolean {
@@ -164,7 +109,11 @@ serve(async (req) => {
 
     const model = pickImageModel(requestedModel, s?.image_model);
     const ratio = normalizeAspectRatio(aspectRatio);
-    const fullPrompt = assembleImagePrompt(brief, {
+    // Document: Gemini imageConfig supports 1:1, 4:5, 16:9, 3:4, 9:16 (among others).
+    // We only pass ratios the UI exposes; unsupported tokens are dropped (not remapped).
+    void SUPPORTED_ASPECT_RATIOS;
+
+    const overlays: ImageOverlayOpts = {
       aspectRatio: ratio,
       language,
       style,
@@ -173,9 +122,12 @@ serve(async (req) => {
       textOverlay,
       wordmark,
       margin,
-    });
+    };
+
+    const fullPrompt = assembleImagePrompt(brief, overlays);
 
     const callModel = async (promptText: string) => {
+      // inputImageUrl is always re-attached so fallback keeps image editing context.
       const parts = await buildImageParts(promptText, inputImageUrl);
       return generateImageRouted({
         settings,
@@ -201,9 +153,10 @@ serve(async (req) => {
     }
 
     if ("status" in result) {
-      console.warn("generate-image: first attempt failed, retrying with conservative fallback prompt");
+      console.warn("generate-image: first attempt failed, retrying with overlay-preserving fallback prompt");
       try {
-        result = await callModel(buildFallbackImagePrompt(brief, { language }));
+        // Fallback MUST keep textOverlay, wordmark, style, mood, colors, aspect, margin, language.
+        result = await callModel(assembleFallbackImagePrompt(brief, overlays));
       } catch (e) {
         const mapped = mapProviderHttpError(e);
         return json(mapped.status, { success: false, error: mapped.error });

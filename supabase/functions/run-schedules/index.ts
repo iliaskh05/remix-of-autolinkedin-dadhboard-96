@@ -7,7 +7,7 @@ import { fetchWithRetry } from "../_shared/httpRetry.ts";
 import { buildSystemPrompt, type WritePostResult } from "../_shared/textPrompt.ts";
 import {
   buildGuardedImagePrompt,
-  buildFallbackImagePrompt,
+  assembleFallbackImagePrompt,
   normalizeVisualBrief,
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
@@ -167,8 +167,10 @@ async function generateImage(
 
   let dataUrl = await attempt(buildGuardedImagePrompt(brief, { language }));
   if (!dataUrl) {
-    console.warn(`schedule image gen: first attempt failed, retrying with conservative fallback prompt`);
-    dataUrl = await attempt(buildFallbackImagePrompt(brief, { language }));
+    console.warn(`schedule image gen: first attempt failed, retrying with overlay-preserving fallback prompt`);
+    // Schedules have no Composer overlays; still use assembleFallback so language
+    // + production rules stay consistent with generate-image.
+    dataUrl = await attempt(assembleFallbackImagePrompt(brief, { language }));
   }
   if (!dataUrl) return null;
 

@@ -94,35 +94,39 @@ export const POST_MODELS: AiModel[] = [
 
 export const IMAGE_MODELS: AiModel[] = [
   {
-    value: "google/gemini-3-pro-image",
-    label: "Nano Banana Pro — Gemini 3 Pro Image (défaut, qualité max)",
+    value: "google/gemini-2.5-flash-image",
+    label: "Nano Banana — Gemini 2.5 Flash Image (défaut, stable GA)",
     owner: "google",
     capability: "image",
     supportsDirectApi: true,
     supportsLovableGateway: true,
     supportsInputImage: true,
+    description: "Stable GA image model. Best production default for BYOK direct Google API.",
+  },
+  {
+    value: "google/gemini-3-pro-image",
+    label: "Nano Banana Pro — Gemini 3 Pro Image (qualité max, texte précis)",
+    owner: "google",
+    capability: "image",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+    supportsInputImage: true,
+    description: "GA. Best for complex LinkedIn infographics and accurate on-image text.",
   },
   {
     value: "google/gemini-3.1-flash-image",
-    label: "Nano Banana 2 (rapide)",
+    label: "Nano Banana 2 — Gemini 3.1 Flash Image (rapide)",
     owner: "google",
     capability: "image",
     supportsDirectApi: true,
     supportsLovableGateway: true,
     supportsInputImage: true,
-  },
-  {
-    value: "google/gemini-2.5-flash-image",
-    label: "Nano Banana (rapide & économique)",
-    owner: "google",
-    capability: "image",
-    supportsDirectApi: true,
-    supportsLovableGateway: true,
-    supportsInputImage: true,
+    description: "Documented GA Flash Image model for high-velocity generation.",
   },
 ];
 
-export const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
+/** Production-stable default — Gemini 2.5 Flash Image (GA). */
+export const DEFAULT_IMAGE_MODEL = "google/gemini-2.5-flash-image";
 export const DEFAULT_POST_MODEL = "google/gemini-2.5-flash";
 
 // Configurable "voice" options for text generation (System Prompt building).

@@ -4,16 +4,15 @@
  */
 import type { Part } from "npm:@google/generative-ai";
 import type { AiUserSettings } from "./ai-provider.ts";
-import { resolveProvider, ALLOWED_IMAGE_MODELS } from "./ai-provider.ts";
+import { resolveProvider, ALLOWED_IMAGE_MODELS, DEFAULT_IMAGE_MODEL_ID } from "./ai-provider.ts";
 import { generateImageWithGemini, type GeminiImageResult, type GeminiUpstreamError } from "./gemini.ts";
 import { generateImageWithLovable } from "./lovable.ts";
 
 export type ImageGenResult = GeminiImageResult | GeminiUpstreamError;
 
 export function pickImageModel(requested: string | null | undefined, settingsModel: string | null | undefined): string {
-  const DEFAULT = "google/gemini-3-pro-image";
-  let model = requested || settingsModel || DEFAULT;
-  if (!ALLOWED_IMAGE_MODELS.includes(model)) model = DEFAULT;
+  let model = requested || settingsModel || DEFAULT_IMAGE_MODEL_ID;
+  if (!ALLOWED_IMAGE_MODELS.includes(model)) model = DEFAULT_IMAGE_MODEL_ID;
   return model;
 }
 

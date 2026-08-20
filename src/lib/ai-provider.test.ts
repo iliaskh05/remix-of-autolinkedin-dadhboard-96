@@ -124,6 +124,7 @@ describe("ai-provider resolver", () => {
   it("normalizes Gemini model aliases", () => {
     expect(normalizeGeminiTextModel("google/gemini-3-flash-preview")).toBe("gemini-2.5-flash");
     expect(normalizeGeminiImageModel("google/gemini-3-pro-image-preview")).toBe("gemini-3-pro-image");
+    expect(normalizeGeminiImageModel("google/gemini-2.5-flash-image")).toBe("gemini-2.5-flash-image");
   });
 
   it("describes routing status for UI", () => {

@@ -57,13 +57,31 @@ export const GEMINI_TEXT_ALIASES: Record<string, string> = {
 
 export const GEMINI_IMAGE_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
-  "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
-  "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
   "google/gemini-3-pro-image": "gemini-3-pro-image",
+  "google/gemini-3.1-flash-image": "gemini-3.1-flash-image",
+  // Legacy preview ids → same GA model (not a different family)
+  "google/gemini-2.5-flash-image-preview": "gemini-2.5-flash-image",
+  "google/gemini-3-pro-image-preview": "gemini-3-pro-image",
+  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
 };
 
-export const ALLOWED_IMAGE_MODELS = Object.keys(GEMINI_IMAGE_ALIASES);
+export const ALLOWED_IMAGE_MODELS = [
+  "google/gemini-2.5-flash-image",
+  "google/gemini-3-pro-image",
+  "google/gemini-3.1-flash-image",
+  // Accept legacy stored values
+  "google/gemini-2.5-flash-image-preview",
+  "google/gemini-3-pro-image-preview",
+  "google/gemini-3.1-flash-image-preview",
+];
+
+export const DEFAULT_IMAGE_MODEL_ID = "google/gemini-2.5-flash-image";
+
+/** Strip only the known `google/` provider prefix. */
+export function normalizeGoogleModel(modelId: string): string {
+  if (modelId.startsWith("google/")) return modelId.slice("google/".length);
+  return modelId;
+}
 
 export function detectModelOwner(modelId: string): ModelOwner {
   if (modelId.startsWith("openai/")) return "openai";
@@ -72,13 +90,17 @@ export function detectModelOwner(modelId: string): ModelOwner {
 
 export function normalizeGeminiTextModel(modelId: string): string {
   if (GEMINI_TEXT_ALIASES[modelId]) return GEMINI_TEXT_ALIASES[modelId];
-  if (modelId.startsWith("google/")) return modelId.replace(/^google\//, "");
+  if (modelId.startsWith("google/")) return normalizeGoogleModel(modelId);
   if (modelId.startsWith("openai/")) return "gemini-2.5-flash";
   return modelId || "gemini-2.5-flash";
 }
 
 export function normalizeGeminiImageModel(modelId: string): string {
-  return GEMINI_IMAGE_ALIASES[modelId] ?? (modelId.replace(/^google\//, "") || "gemini-3-pro-image");
+  if (GEMINI_IMAGE_ALIASES[modelId]) return GEMINI_IMAGE_ALIASES[modelId];
+  const bare = normalizeGoogleModel(modelId);
+  const knownBare = new Set(Object.values(GEMINI_IMAGE_ALIASES));
+  if (knownBare.has(bare)) return bare;
+  return bare;
 }
 
 export function normalizeOpenAiModel(modelId: string): string {
@@ -98,7 +120,7 @@ function resolveRoute(
   capability: Capability,
 ): Omit<ResolvedProvider, "apiKey"> {
   const requestedModel = modelId ||
-    (capability === "image" ? "google/gemini-3-pro-image" : "google/gemini-2.5-flash");
+    (capability === "image" ? DEFAULT_IMAGE_MODEL_ID : "google/gemini-2.5-flash");
   const owner = detectModelOwner(requestedModel);
 
   if (capability === "image" && owner === "openai") {
