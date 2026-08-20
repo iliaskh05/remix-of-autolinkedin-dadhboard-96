@@ -11,7 +11,9 @@ import {
   normalizeVisualBrief,
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
-import { generateWritePostWithGemini, generateImageWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
+import { generateWritePost } from "../_shared/generateText.ts";
+import { generateImageRouted, pickImageModel } from "../_shared/generateImage.ts";
+import type { AiUserSettings } from "../_shared/ai-provider.ts";
 import type { AppSupabaseClient, ScheduleRow } from "../_shared/types.ts";
 
 type Source = { type: "url" | "keyword" | "idea"; value: string };
@@ -105,15 +107,14 @@ async function gatherSources(sources: Source[], usedUrls: Set<string>): Promise<
   return { context: chunks.join("\n\n---\n\n"), freshUrls };
 }
 
-// ===== AI text generation (Phase 5 — shared ghostwriter prompt) =====
+// ===== AI text generation (shared provider resolver) =====
 async function generateText(opts: {
   prompt: string;
   toneInstructions: string | null;
   language: string | null | undefined;
   sourceCtx: string;
   model: string;
-  useByok: boolean;
-  openaiKey: string | null;
+  settings: AiUserSettings;
 }): Promise<WritePostResult> {
   const sys = buildSystemPrompt({
     toneInstructions: opts.toneInstructions,
@@ -124,68 +125,42 @@ async function generateText(opts: {
     : "";
   const userMsg = `Topic: ${opts.prompt || "a relevant, current topic in commodities, finance or global trade."}${sourceBlock}`;
 
-  if (opts.useByok && opts.model.startsWith("openai/") && opts.openaiKey) {
-    const { WRITE_POST_TOOL, parseWritePostToolCall } = await import("../_shared/textPrompt.ts");
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${opts.openaiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: opts.model.replace("openai/", ""),
-        messages: [{ role: "system", content: sys }, { role: "user", content: userMsg }],
-        tools: [WRITE_POST_TOOL],
-        tool_choice: { type: "function", function: { name: "write_post" } },
-      }),
-    });
-    if (!res.ok) {
-      console.error(`run-schedules text AI error [${res.status}]`, await res.text());
-      throw new Error("AI_TEXT_ERROR");
-    }
-    const data = await res.json();
-    const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!tc) throw new Error("AI returned no structured data");
-    return parseWritePostToolCall(tc.function.arguments);
-  }
-
-  getGeminiApiKey();
-  return generateWritePostWithGemini({
+  return generateWritePost({
+    settings: opts.settings,
+    model: opts.model,
     systemPrompt: sys,
     userPrompt: userMsg,
-    model: opts.model,
   });
 }
 
-// ===== AI image (Phase 6 — guarded visual_brief + fallback on rejection) =====
+// ===== AI image (same provider routing as generate-image) =====
 async function generateImage(
   briefOrSubject: VisualBrief | string,
   model: string | null | undefined,
   supabase: AppSupabaseClient,
   userId: string,
+  settings: AiUserSettings,
   language?: string | null,
 ): Promise<string | null> {
-  try {
-    getGeminiApiKey();
-  } catch {
-    return null;
-  }
-
-  const selectedModel = model || "google/gemini-3-pro-image";
+  const selectedModel = pickImageModel(null, model);
   const brief = typeof briefOrSubject === "string"
     ? normalizeVisualBrief(null, briefOrSubject)
     : normalizeVisualBrief(briefOrSubject);
 
   const attempt = async (imgPrompt: string): Promise<string | null> => {
     try {
-      const result = await generateImageWithGemini({
-        prompt: imgPrompt,
+      const result = await generateImageRouted({
+        settings,
         model: selectedModel,
+        prompt: imgPrompt,
       });
       if ("status" in result) {
-        console.warn("Gemini scheduled image generation failed", result.status, result.message);
+        console.warn("Scheduled image generation failed", result.status, result.message);
         return null;
       }
       return `data:${result.mimeType};base64,${result.base64}`;
     } catch (e) {
-      console.warn("img gen threw", e);
+      console.warn("img gen threw", e instanceof Error ? e.message : e);
       return null;
     }
   };
@@ -292,16 +267,14 @@ async function processSchedule(supabase: AppSupabaseClient, sched: ScheduleRow) 
   const { context: sourceCtx, freshUrls } = await gatherSources(sources, usedUrlSet);
 
   const { data: us } = await supabase.from("user_settings")
-    .select("post_model, use_byok, openai_api_key, tone_instructions, image_model")
+    .select("post_model, use_byok, openai_api_key, gemini_api_key, tone_instructions, image_model")
     .eq("user_id", userId).maybeSingle();
-  let model = sched.ai_model || us?.post_model || "google/gemini-2.5-pro";
-  try {
-    getGeminiApiKey();
-  } catch {
-    if (!(us?.use_byok && model.startsWith("openai/") && us.openai_api_key)) {
-      throw new Error("GEMINI_API_KEY not configured");
-    }
-  }
+  const model = sched.ai_model || us?.post_model || "google/gemini-2.5-pro";
+  const aiSettings: AiUserSettings = {
+    use_byok: Boolean(us?.use_byok),
+    openai_api_key: us?.openai_api_key ?? null,
+    gemini_api_key: us?.gemini_api_key ?? null,
+  };
 
   // Try up to 2 generations to avoid duplicate content vs. the schedule's recent history
   let attemptCount = 0;
@@ -315,8 +288,7 @@ async function processSchedule(supabase: AppSupabaseClient, sched: ScheduleRow) 
       language: sched.language || "fr",
       sourceCtx,
       model,
-      useByok: Boolean(us?.use_byok),
-      openaiKey: us?.openai_api_key ?? null,
+      settings: aiSettings,
     });
     hash = await sha256Hex(g.content.replace(/\s+/g, " ").trim().toLowerCase().substring(0, 500));
     if (!recentHashes.has(hash)) { generated = g; break; }
@@ -339,6 +311,7 @@ async function processSchedule(supabase: AppSupabaseClient, sched: ScheduleRow) 
       us?.image_model,
       supabase,
       userId,
+      aiSettings,
       sched.language || "fr",
     );
   }

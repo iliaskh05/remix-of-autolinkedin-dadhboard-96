@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { DAYS } from "@/lib/scheduleUtils";
-import { getSafeErrorMessage } from "@/lib/errors";
+import { getSafeErrorMessage, throwInvokeError } from "@/lib/errors";
 import { POST_LANGUAGES, DEFAULT_POST_LANGUAGE, isPostLanguage } from "@/lib/ai-models";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -77,8 +77,7 @@ export default function Schedules() {
   const runNow = useMutation({
     mutationFn: async (id: string) => {
       const { data, error } = await supabase.functions.invoke("run-schedules", { body: { schedule_id: id } });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Échec");
+      if (error || !data?.success) throwInvokeError({ error, data }, data?.error || "Échec");
       const r = data.results?.[0];
       if (r && !r.ok) throw new Error(r.error || "Échec");
     },

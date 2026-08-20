@@ -17,6 +17,7 @@ import {
   AlertTriangle, Plus, Trash2, Globe, Hash, Linkedin, BookMarked, Sparkles, KeyRound, Copy, Check,
 } from "lucide-react";
 import { POST_MODELS, IMAGE_MODELS, DEFAULT_IMAGE_MODEL, POST_TONES, POST_LENGTHS } from "@/lib/ai-models";
+import { describeRoutingStatus } from "@/lib/ai-provider";
 import { getSafeErrorMessage } from "@/lib/errors";
 
 type UserSettings = {
@@ -53,15 +54,18 @@ type ByokProvider = {
 };
 
 const TEXT_PROVIDERS: ByokProvider[] = [
-  { field: "openai_api_key", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys", hint: "GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5.2." },
-  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Tous Gemini texte + image (2.5/3.x, Nano Banana 1, 2 et Pro)." },
-  { field: "anthropic_api_key", label: "Anthropic Claude", placeholder: "sk-ant-...", url: "https://console.anthropic.com/settings/keys", hint: "Claude Opus, Sonnet, Haiku." },
-  { field: "mistral_api_key", label: "Mistral AI", placeholder: "...", url: "https://console.mistral.ai/api-keys", hint: "Mistral Large, Medium, Small, Codestral." },
-  { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Llama 3.x, Mixtral — inférence ultra-rapide." },
-  { field: "deepseek_api_key", label: "DeepSeek", placeholder: "sk-...", url: "https://platform.deepseek.com/api_keys", hint: "DeepSeek V3, R1 reasoning." },
-  { field: "xai_api_key", label: "xAI Grok", placeholder: "xai-...", url: "https://console.x.ai/", hint: "Grok 2, Grok 4." },
-  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Sonar (LLM avec recherche intégrée)." },
-  { field: "openrouter_api_key", label: "OpenRouter", placeholder: "sk-or-...", url: "https://openrouter.ai/keys", hint: "Routeur unifié vers 200+ modèles (Llama, Qwen, Cohere…)." },
+  { field: "openai_api_key", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys", hint: "Requis pour les modèles openai/* en BYOK." },
+  { field: "gemini_api_key", label: "Google Gemini", placeholder: "AIza...", url: "https://aistudio.google.com/app/apikey", hint: "Requis pour texte + image Gemini en BYOK (accès direct Google, sans crédits Lovable)." },
+];
+
+const OTHER_PROVIDERS: ByokProvider[] = [
+  { field: "anthropic_api_key", label: "Anthropic Claude", placeholder: "sk-ant-...", url: "https://console.anthropic.com/settings/keys", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "mistral_api_key", label: "Mistral AI", placeholder: "...", url: "https://console.mistral.ai/api-keys", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "groq_api_key", label: "Groq", placeholder: "gsk_...", url: "https://console.groq.com/keys", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "deepseek_api_key", label: "DeepSeek", placeholder: "sk-...", url: "https://platform.deepseek.com/api_keys", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "xai_api_key", label: "xAI Grok", placeholder: "xai-...", url: "https://console.x.ai/", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "perplexity_api_key", label: "Perplexity", placeholder: "pplx-...", url: "https://www.perplexity.ai/settings/api", hint: "Stockée pour usage futur — pas encore branchée." },
+  { field: "openrouter_api_key", label: "OpenRouter", placeholder: "sk-or-...", url: "https://openrouter.ai/keys", hint: "Stockée pour usage futur — pas encore branchée." },
 ];
 
 const LS_KEY = (uid: string) => `linkedin_app_draft_${uid}`;
@@ -540,14 +544,29 @@ const Settings = () => {
           <div className="flex items-center justify-between pt-2 border-t">
             <div>
               <Label>Utilise tes propres clés API (BYOK)</Label>
-              <p className="text-xs text-muted-foreground">Utilise tes propres clés au lieu de Lovable AI / connecteurs partagés. Tu ne paies que ce que tu consommes chez chaque fournisseur.</p>
+              <p className="text-xs text-muted-foreground">
+                {(() => {
+                  const status = describeRoutingStatus({
+                    use_byok: s.use_byok,
+                    gemini_api_key: s.gemini_api_key,
+                    openai_api_key: s.openai_api_key,
+                  });
+                  return (
+                    <>
+                      <span className="font-medium text-foreground">{status.title}</span>
+                      {" — "}
+                      {status.description}
+                    </>
+                  );
+                })()}
+              </p>
             </div>
             <Switch checked={s.use_byok} onCheckedChange={(v) => setS({ ...s, use_byok: v })} />
           </div>
           {s.use_byok && (
             <div className="space-y-4 pl-4 border-l-2 border-primary/30">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Modèles IA (texte & image)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Clés actives (texte & image)</p>
                 <div className="space-y-3">
                   {TEXT_PROVIDERS.map((p) => (
                     <div key={p.field as string} className="space-y-1">
@@ -569,6 +588,25 @@ const Settings = () => {
               </div>
 
               <div className="pt-3 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Autres fournisseurs (stockage uniquement)</p>
+                <div className="space-y-3">
+                  {OTHER_PROVIDERS.map((p) => (
+                    <div key={p.field as string} className="space-y-1">
+                      <Label>Clé API {p.label}</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={(s[p.field] as string | null) || ""}
+                        onChange={(e) => setS({ ...s, [p.field]: e.target.value } as UserSettings)}
+                        placeholder={p.placeholder}
+                      />
+                      <p className="text-[11px] text-muted-foreground">{p.hint}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Sources de contenu (scraping & recherche)</p>
                 <div className="space-y-1">
                   <Label>Clé API Firecrawl</Label>
@@ -581,8 +619,15 @@ const Settings = () => {
               </div>
 
               <div className="rounded-md bg-muted/50 p-3 text-[11px] text-muted-foreground">
-                💡 Tu peux ne renseigner que certaines clés. Pour celles qui sont vides, l'app retombe automatiquement sur Lovable AI / connecteurs partagés.
+                BYOK ON + clé Gemini → appels directs à Google (pas de crédits Lovable).
+                BYOK OFF → passerelle Lovable (peut consommer des crédits workspace).
               </div>
+            </div>
+          )}
+          {!s.use_byok && (
+            <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-[11px] text-muted-foreground">
+              Lovable Gateway actif — la génération texte/image peut consommer des crédits Lovable.
+              Active BYOK et ajoute une clé Gemini pour utiliser Google directement.
             </div>
           )}
         </CardContent>

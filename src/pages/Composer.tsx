@@ -32,7 +32,7 @@ import {
   POST_TONES, POST_LENGTHS, POST_LANGUAGES, DEFAULT_POST_TONE, DEFAULT_POST_LENGTH,
   DEFAULT_POST_LANGUAGE, isPostLanguage, type PostLanguage,
 } from "@/lib/ai-models";
-import { getSafeErrorMessage } from "@/lib/errors";
+import { getSafeErrorMessage, throwInvokeError } from "@/lib/errors";
 import { DAYS, computeNextRunISO } from "@/lib/scheduleUtils";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -188,8 +188,7 @@ const Composer = () => {
           language,
         },
       });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Failed");
+      if (error || !data?.success) throwInvokeError({ error, data }, data?.error || "Failed");
       return data;
     },
     onSuccess: (d) => {
@@ -236,8 +235,7 @@ const Composer = () => {
           wordmark: prefs.wordmark,
         },
       });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Failed");
+      if (error || !data?.success) throwInvokeError({ error, data }, data?.error || "Failed");
       return data.imageUrl as string;
     },
     onSuccess: (url) => {
@@ -371,15 +369,21 @@ const Composer = () => {
     }
   };
 
-  // UI-only orchestrator for the "Génération rapide" card — reuses existing mutations.
+  // UI-only orchestrator for the "Génération rapide" card — text first, then image
+  // from the draft brief. Image failure must not wipe a successful text draft.
   const runQuickGeneration = async () => {
     try {
       const draft = await generateText.mutateAsync("create");
       if (includeImage) {
-        await generateImage.mutateAsync({
-          visualBrief: isVisualBrief(draft?.visual_brief) ? draft.visual_brief : null,
-          prompt: draft?.image_prompt || imagePrompt,
-        });
+        const imgResult = await Promise.allSettled([
+          generateImage.mutateAsync({
+            visualBrief: isVisualBrief(draft?.visual_brief) ? draft.visual_brief : null,
+            prompt: draft?.image_prompt || imagePrompt,
+          }),
+        ]);
+        if (imgResult[0]?.status === "rejected") {
+          // Text toast already fired by generateImage.onError; keep the draft.
+        }
       }
     } catch {
       // Errors are already toasted by each mutation's onError.

@@ -9,17 +9,8 @@ import {
   normalizeVisualBrief,
   type VisualBrief,
 } from "../_shared/imagePrompt.ts";
-import { generateImageWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
-
-const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
-
-const ALLOWED_MODELS = [
-  "google/gemini-2.5-flash-image",
-  "google/gemini-3.1-flash-image-preview",
-  "google/gemini-3-pro-image-preview",
-  "google/gemini-3.1-flash-image",
-  "google/gemini-3-pro-image",
-];
+import { generateImageRouted, pickImageModel } from "../_shared/generateImage.ts";
+import { mapProviderHttpError, type AiUserSettings } from "../_shared/ai-provider.ts";
 
 const POSITION_LABELS: Record<string, string> = {
   "top-left": "top-left corner",
@@ -162,17 +153,16 @@ serve(async (req) => {
     if (!rate.allowed) return json(429, { success: false, error: "Trop de générations d'image en peu de temps. Patiente une minute." });
 
     const { data: s } = await supabase.from("user_settings")
-      .select("image_model").eq("user_id", userId).maybeSingle();
+      .select("image_model, use_byok, gemini_api_key, openai_api_key")
+      .eq("user_id", userId).maybeSingle();
 
-    let model = requestedModel || s?.image_model || DEFAULT_IMAGE_MODEL;
-    if (!ALLOWED_MODELS.includes(model)) model = DEFAULT_IMAGE_MODEL;
+    const settings: AiUserSettings = {
+      use_byok: Boolean(s?.use_byok),
+      gemini_api_key: s?.gemini_api_key ?? null,
+      openai_api_key: s?.openai_api_key ?? null,
+    };
 
-    try {
-      getGeminiApiKey();
-    } catch {
-      return json(500, { success: false, error: "Configure GEMINI_API_KEY dans les secrets Supabase." });
-    }
-
+    const model = pickImageModel(requestedModel, s?.image_model);
     const ratio = normalizeAspectRatio(aspectRatio);
     const fullPrompt = assembleImagePrompt(brief, {
       aspectRatio: ratio,
@@ -187,29 +177,47 @@ serve(async (req) => {
 
     const callModel = async (promptText: string) => {
       const parts = await buildImageParts(promptText, inputImageUrl);
-      return generateImageWithGemini({
-        prompt: promptText,
+      return generateImageRouted({
+        settings,
         model,
+        prompt: promptText,
         aspectRatio: ratio,
         parts,
+        inputImageUrl,
       });
     };
 
-    let result = await callModel(fullPrompt);
+    let result;
+    try {
+      result = await callModel(fullPrompt);
+    } catch (e) {
+      const mapped = mapProviderHttpError(e);
+      return json(mapped.status, { success: false, error: mapped.error });
+    }
 
-    if ("status" in result && result.status === 429) {
-      return json(429, { success: false, error: "Rate limit exceeded." });
+    if ("status" in result && (result.status === 429 || result.status === 402 || result.status === 401)) {
+      const mapped = mapProviderHttpError(new Error(result.message));
+      return json(mapped.status, { success: false, error: mapped.error });
     }
 
     if ("status" in result) {
       console.warn("generate-image: first attempt failed, retrying with conservative fallback prompt");
-      result = await callModel(buildFallbackImagePrompt(brief, { language }));
+      try {
+        result = await callModel(buildFallbackImagePrompt(brief, { language }));
+      } catch (e) {
+        const mapped = mapProviderHttpError(e);
+        return json(mapped.status, { success: false, error: mapped.error });
+      }
     }
 
     if ("status" in result) {
+      const mapped = mapProviderHttpError(new Error(result.message));
+      if (mapped.status === 402 || mapped.status === 401 || mapped.status === 429) {
+        return json(mapped.status, { success: false, error: mapped.error });
+      }
       return json(502, {
         success: false,
-        error: "La génération d'image a échoué pour ce sujet. Essaie une description différente, ou continue sans image.",
+        error: "Gemini image generation failed. Try a different description, or continue without an image.",
       });
     }
 
@@ -220,13 +228,13 @@ serve(async (req) => {
     const fileName = `${userId}/${crypto.randomUUID()}.${extension}`;
     const { error: upErr } = await supabase.storage.from("post-assets").upload(fileName, bytes, { contentType: mimeType });
     if (upErr) {
-      console.error("upload err", upErr);
+      console.error("upload err", upErr.message);
       return json(200, { success: true, imageUrl: `data:${mimeType};base64,${base64}` });
     }
     const { data: pub } = supabase.storage.from("post-assets").getPublicUrl(fileName);
     return json(200, { success: true, imageUrl: pub.publicUrl });
   } catch (e) {
-    console.error("generate-image error", e);
+    console.error("generate-image error", e instanceof Error ? e.message : e);
     return json(500, { success: false, error: "Échec de la génération d'image." });
   }
 });

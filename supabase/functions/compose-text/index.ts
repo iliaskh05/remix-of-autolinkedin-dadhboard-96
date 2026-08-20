@@ -1,10 +1,11 @@
-// On-demand LinkedIn text generator with free-form topic + optional sources (URLs/keywords/ideas) + image context
+// On-demand LinkedIn text generator with free-form topic + optional sources + image context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
 import { buildSystemPrompt } from "../_shared/textPrompt.ts";
-import { generateWritePostWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
+import { generateWritePost } from "../_shared/generateText.ts";
+import { mapProviderHttpError, type AiUserSettings } from "../_shared/ai-provider.ts";
 
 type SourceInput = { type: "url" | "keyword" | "idea"; value: string };
 type SearchResult = { title?: string; description?: string; url?: string };
@@ -56,34 +57,6 @@ async function gatherSourceContext(sources: SourceInput[]): Promise<string> {
   return chunks.join("\n\n---\n\n");
 }
 
-async function callOpenAiWritePost(opts: {
-  url: string;
-  key: string;
-  model: string;
-  systemPrompt: string;
-  userMsg: string;
-}) {
-  const { WRITE_POST_TOOL, parseWritePostToolCall } = await import("../_shared/textPrompt.ts");
-  const res = await fetch(opts.url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${opts.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: opts.model,
-      messages: [{ role: "system", content: opts.systemPrompt }, { role: "user", content: opts.userMsg }],
-      tools: [WRITE_POST_TOOL],
-      tool_choice: { type: "function", function: { name: "write_post" } },
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenAI upstream error [${res.status}]: ${text}`);
-  }
-  const data = await res.json();
-  const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!tc) throw new Error("AI returned no structured data");
-  return parseWritePostToolCall(tc.function.arguments);
-}
-
 serve(async (req) => {
   const corsHeaders = buildCorsHeaders(req);
   const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -103,8 +76,14 @@ serve(async (req) => {
     }
 
     const { data: s } = await supabase.from("user_settings")
-      .select("post_model, use_byok, openai_api_key, tone_instructions, post_tone, post_audience, post_length")
+      .select("post_model, use_byok, openai_api_key, gemini_api_key, tone_instructions, post_tone, post_audience, post_length")
       .eq("user_id", userId).maybeSingle();
+
+    const settings: AiUserSettings = {
+      use_byok: Boolean(s?.use_byok),
+      openai_api_key: s?.openai_api_key ?? null,
+      gemini_api_key: s?.gemini_api_key ?? null,
+    };
 
     const effectiveTone = tone ?? s?.post_tone ?? null;
     const effectiveAudience = audience ?? s?.post_audience ?? null;
@@ -148,41 +127,27 @@ serve(async (req) => {
       userMsg = `Topic: ${prompt || "a relevant, current topic in commodities, finance or global trade."}${sourceBlock}`;
     }
 
+    if (imageUrl) {
+      try {
+        const imgRes = await fetch(imageUrl);
+        if (imgRes.ok) {
+          userMsg += `\n\n[An image was provided at ${imageUrl} — describe its relevant business theme in the post.]`;
+        }
+      } catch { /* ignore */ }
+    }
+
     let result;
     try {
-      if (s?.use_byok && model.startsWith("openai/") && s.openai_api_key) {
-        result = await callOpenAiWritePost({
-          url: "https://api.openai.com/v1/chat/completions",
-          key: s.openai_api_key,
-          model: model.replace("openai/", ""),
-          systemPrompt: sys,
-          userMsg,
-        });
-      } else {
-        getGeminiApiKey(); // throws if missing
-        if (imageUrl) {
-          // Multimodal: append image context as text when using Gemini text models.
-          try {
-            const imgRes = await fetch(imageUrl);
-            if (imgRes.ok) {
-              userMsg += `\n\n[An image was provided at ${imageUrl} — describe its relevant business theme in the post.]`;
-            }
-          } catch { /* ignore */ }
-        }
-        result = await generateWritePostWithGemini({
-          systemPrompt: sys,
-          userPrompt: userMsg,
-          model,
-        });
-      }
+      result = await generateWritePost({
+        settings,
+        model,
+        systemPrompt: sys,
+        userPrompt: userMsg,
+      });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/429|quota|rate/i.test(msg)) return json(429, { success: false, error: "Rate limit exceeded." });
-      if (/GEMINI_API_KEY/.test(msg)) {
-        return json(500, { success: false, error: "Configure GEMINI_API_KEY dans les secrets Supabase." });
-      }
-      console.error("compose-text AI error:", msg);
-      return json(502, { success: false, error: "Le service de génération IA est momentanément indisponible." });
+      const mapped = mapProviderHttpError(e);
+      console.error("compose-text AI error:", mapped.error);
+      return json(mapped.status, { success: false, error: mapped.error });
     }
 
     return json(200, {

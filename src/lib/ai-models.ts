@@ -1,41 +1,133 @@
 // Available AI models for users to pick from in Settings.
-// Used for the "post" (text) generation and "image" generation features.
+// `owner` = who built the model (Google / OpenAI).
+// Runtime execution (direct API vs Lovable Gateway) is decided server-side
+// by supabase/functions/_shared/ai-provider.ts based on use_byok + keys.
+
+export type ModelOwner = "google" | "openai";
 
 export type AiModel = {
   value: string;
   label: string;
-  provider: "lovable" | "openai" | "gemini";
+  /** Model owner / family — NOT the execution gateway. */
+  owner: ModelOwner;
+  capability: "text" | "image";
+  supportsDirectApi: boolean;
+  supportsLovableGateway: boolean;
+  supportsInputImage?: boolean;
   description?: string;
 };
 
 export const POST_MODELS: AiModel[] = [
-  { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash (default, fast)", provider: "lovable" },
-  { value: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (best reasoning)", provider: "lovable" },
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "lovable" },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (balanced)", provider: "lovable" },
-  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite (cheapest)", provider: "lovable" },
-  { value: "openai/gpt-5", label: "GPT-5 (powerful)", provider: "lovable" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", provider: "lovable" },
-  { value: "openai/gpt-5-nano", label: "GPT-5 Nano (fastest)", provider: "lovable" },
-  { value: "openai/gpt-5.2", label: "GPT-5.2 (latest)", provider: "lovable" },
+  {
+    value: "google/gemini-3-flash-preview",
+    label: "Gemini 3 Flash (default, fast)",
+    owner: "google",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "google/gemini-3.1-pro-preview",
+    label: "Gemini 3.1 Pro (best reasoning)",
+    owner: "google",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "google/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    owner: "google",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "google/gemini-2.5-flash",
+    label: "Gemini 2.5 Flash (balanced)",
+    owner: "google",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "google/gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite (cheapest)",
+    owner: "google",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "openai/gpt-5",
+    label: "GPT-5 (powerful) — BYOK only",
+    owner: "openai",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "openai/gpt-5-mini",
+    label: "GPT-5 Mini — BYOK only",
+    owner: "openai",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "openai/gpt-5-nano",
+    label: "GPT-5 Nano (fastest) — BYOK only",
+    owner: "openai",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
+  {
+    value: "openai/gpt-5.2",
+    label: "GPT-5.2 (latest) — BYOK only",
+    owner: "openai",
+    capability: "text",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+  },
 ];
 
 export const IMAGE_MODELS: AiModel[] = [
-  { value: "google/gemini-3-pro-image", label: "Nano Banana Pro — Gemini 3 Pro Image (défaut, qualité max)", provider: "gemini" },
-  { value: "google/gemini-3.1-flash-image", label: "Nano Banana 2 (rapide)", provider: "gemini" },
-  { value: "google/gemini-2.5-flash-image", label: "Nano Banana (rapide & économique)", provider: "gemini" },
+  {
+    value: "google/gemini-3-pro-image",
+    label: "Nano Banana Pro — Gemini 3 Pro Image (défaut, qualité max)",
+    owner: "google",
+    capability: "image",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+    supportsInputImage: true,
+  },
+  {
+    value: "google/gemini-3.1-flash-image",
+    label: "Nano Banana 2 (rapide)",
+    owner: "google",
+    capability: "image",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+    supportsInputImage: true,
+  },
+  {
+    value: "google/gemini-2.5-flash-image",
+    label: "Nano Banana (rapide & économique)",
+    owner: "google",
+    capability: "image",
+    supportsDirectApi: true,
+    supportsLovableGateway: true,
+    supportsInputImage: true,
+  },
 ];
 
 export const DEFAULT_IMAGE_MODEL = "google/gemini-3-pro-image";
+export const DEFAULT_POST_MODEL = "google/gemini-2.5-flash";
 
 // Configurable "voice" options for text generation (System Prompt building).
-// The `value` is a stable key sent to the edge function, which maps it to
-// detailed instructions. The `label` is what the user sees.
-
 export type PostOption = { value: string; label: string };
 
-// "auto" means: don't send an override, let the AI infer the best choice for
-// the topic on its own (Phase 5 — the user only has to give a topic).
 export const POST_TONES: PostOption[] = [
   { value: "auto", label: "Automatique (l'IA choisit)" },
   { value: "professional", label: "Professionnel" },
@@ -56,9 +148,6 @@ export const POST_LENGTHS: PostOption[] = [
 export const DEFAULT_POST_TONE = "auto";
 export const DEFAULT_POST_LENGTH = "auto";
 
-// Global language selector: drives both the post copy and the typography
-// rendered inside the generated image. The code is sent as-is to the Edge
-// Functions, which own the mapping to full prompt directives.
 export type PostLanguage = "fr" | "en" | "es" | "ar";
 
 export const POST_LANGUAGES: { value: PostLanguage; label: string }[] = [

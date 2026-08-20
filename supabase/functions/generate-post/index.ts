@@ -2,45 +2,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
-import { buildSystemPrompt, WRITE_POST_TOOL, parseWritePostToolCall } from "../_shared/textPrompt.ts";
-import { generateWritePostWithGemini, getGeminiApiKey } from "../_shared/gemini.ts";
-
-type Settings = {
-  post_model: string;
-  use_byok: boolean;
-  openai_api_key: string | null;
-  tone_instructions: string | null;
-};
-
-async function callAi(model: string, settings: Settings, systemPrompt: string, userContent: string) {
-  if (settings.use_byok && model.startsWith("openai/") && settings.openai_api_key) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${settings.openai_api_key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: model.replace("openai/", ""),
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userContent }],
-        tools: [WRITE_POST_TOOL],
-        tool_choice: { type: "function", function: { name: "write_post" } },
-      }),
-    });
-    if (!res.ok) {
-      console.error(`generate-post OpenAI error [${res.status}]`, await res.text());
-      throw new Error("AI_UPSTREAM_ERROR");
-    }
-    const data = await res.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("AI returned no structured data");
-    return parseWritePostToolCall(toolCall.function.arguments);
-  }
-
-  getGeminiApiKey();
-  return generateWritePostWithGemini({
-    systemPrompt,
-    userPrompt: userContent,
-    model,
-  });
-}
+import { buildSystemPrompt } from "../_shared/textPrompt.ts";
+import { generateWritePost } from "../_shared/generateText.ts";
+import { mapProviderHttpError, type AiUserSettings } from "../_shared/ai-provider.ts";
 
 serve(async (req) => {
   const corsHeaders = buildCorsHeaders(req);
@@ -62,15 +26,18 @@ serve(async (req) => {
     if (!rate.allowed) return json(429, { success: false, error: "Trop de générations en peu de temps. Patiente une minute." });
 
     const { data: s } = await supabase.from("user_settings")
-      .select("post_model, use_byok, openai_api_key, tone_instructions")
+      .select("post_model, use_byok, openai_api_key, gemini_api_key, tone_instructions")
       .eq("user_id", userId).maybeSingle();
-    const settings: Settings = s as Settings ?? {
-      post_model: "google/gemini-2.5-pro", use_byok: false,
-      openai_api_key: null, tone_instructions: null,
+
+    const settings: AiUserSettings = {
+      use_byok: Boolean(s?.use_byok),
+      openai_api_key: s?.openai_api_key ?? null,
+      gemini_api_key: s?.gemini_api_key ?? null,
     };
+    const model = s?.post_model || "google/gemini-2.5-pro";
 
     const systemPrompt = buildSystemPrompt({
-      toneInstructions: settings.tone_instructions,
+      toneInstructions: s?.tone_instructions ?? null,
       language,
     });
     const newsExcerpt = String(newsMarkdown).substring(0, 8000);
@@ -80,13 +47,15 @@ serve(async (req) => {
 
     let result;
     try {
-      result = await callAi(settings.post_model, settings, systemPrompt, userContent);
+      result = await generateWritePost({
+        settings,
+        model,
+        systemPrompt,
+        userPrompt: userContent,
+      });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/GEMINI_API_KEY/.test(msg)) {
-        return json(500, { success: false, error: "Configure GEMINI_API_KEY dans les secrets Supabase." });
-      }
-      throw e;
+      const mapped = mapProviderHttpError(e);
+      return json(mapped.status, { success: false, error: mapped.error });
     }
 
     return json(200, {
